@@ -471,7 +471,9 @@
     state.shown = PAGE_SIZE;
     state.query = "";
     els.search.value = "";
-    updateHash(slug);
+    showView("list");
+    document.title = "News24 - Đọc báo nhanh 24h từ VnExpress RSS";
+    if (opts.syncUrl !== false) updateHash(slug);
     setActiveNav(slug);
 
     // 1) instant paint from cache (if any)
@@ -537,12 +539,22 @@
     return m && CATEGORIES[m[1]] ? m[1] : "tin-moi-nhat";
   }
 
+  // Category URLs are real paths (/news/<slug>, VnExpress-style) served
+  // through the 404-trick; legacy #/<slug> hash links migrate to them.
+  function currentCat() {
+    const m = /^(?:\/news)?\/([a-z-]+)\/?$/i.exec(decodeURI(location.pathname));
+    return m && CATEGORIES[m[1]] ? m[1] : null;
+  }
+
   function updateHash(slug) {
-    const target = "#/" + slug;
-    if (location.hash !== target) {
-      // replace (not push) to avoid history noise on programmatic loads
-      history.replaceState(null, "", target);
+    if (location.pathname.endsWith("/" + slug)) return; // already there
+    if (location.hash === "#/" + slug) {
+      // migrate a legacy hash URL to the clean path form
+      history.replaceState(null, "", "./" + slug);
+      return;
     }
+    // replace (not push) to avoid history noise on programmatic loads
+    history.replaceState(null, "", "./" + slug);
   }
 
   function setActiveNav(slug) {
@@ -555,12 +567,9 @@
     const link = e.target.closest(".nav-link");
     if (!link) return;
     e.preventDefault();
-    if (currentSlug()) {
-      // from an article page, navigate back to the list view
-      location.href = "./#/" + link.dataset.slug;
-      return;
-    }
-    loadSlug(link.dataset.slug);
+    const slug = link.dataset.slug;
+    history.pushState(null, "", "./" + slug);
+    loadSlug(slug, { syncUrl: false }); // URL already updated by the push
   });
 
   window.addEventListener("hashchange", () => {
@@ -1072,11 +1081,11 @@
       else loadArticle(slug);
       return;
     }
-    // history returned to the list view
     artState.link = null;
     artState.viaPush = false;
-    showView("list");
-    document.title = "News24 - Đọc báo nhanh 24h từ VnExpress RSS";
+    // history landed on a category path (/news/<slug>) or the root
+    const cat = currentCat();
+    loadSlug(cat || "tin-moi-nhat", { syncUrl: false });
   });
 
   // From an in-page article, the back link replays the history entry
@@ -1108,6 +1117,13 @@
     if (slug) {
       // /news/<slug>.html - this page was served by the root 404.html
       loadArticle(slug);
+      loadSidebar();
+      return;
+    }
+    const cat = currentCat();
+    if (cat) {
+      // /news/<category> - real category URL (VnExpress-style)
+      loadSlug(cat);
       loadSidebar();
       return;
     }
