@@ -666,7 +666,9 @@
 
   // Cards link to the slug.html path (served by 404.html on GitHub Pages)
   function relativeSlug(link) {
-    const m = /^https:\/\/vnexpress\.net\/(.+\.html)$/.exec(link || "");
+    const m = /^https:\/\/vnexpress\.net\/([a-z0-9-]+-\d+\.html)(?:[?#].*)?$/i.exec(
+      link || ""
+    );
     return m ? m[1] : link || "#";
   }
 
@@ -755,11 +757,15 @@
       }
     });
 
-    // links: keep only real http(s) hrefs, open them off-site
+    // links: VnExpress article URLs become internal slug pages so
+    // readers stay on-site; anything else http(s) opens off-site
     rootClone.querySelectorAll("a").forEach((a) => {
       const href = decodeAmp(a.getAttribute("href") || "");
       [...a.attributes].forEach((x) => a.removeAttribute(x.name));
-      if (/^https?:\/\//i.test(href)) {
+      const slug = relativeSlug(href);
+      if (/^https:\/\/vnexpress\.net\//i.test(href) && slug !== href) {
+        a.setAttribute("href", slug); // internal article page, same tab
+      } else if (/^https?:\/\//i.test(href)) {
         a.setAttribute("href", href);
         a.setAttribute("target", "_blank");
         a.setAttribute("rel", "noopener");
