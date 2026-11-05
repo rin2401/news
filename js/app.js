@@ -219,10 +219,13 @@
     }
   }
 
-  function fetchWithTimeout(url, ms, headers) {
+  function fetchWithTimeout(url, ms, headers, init) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), ms);
+    init = init || {};
     return fetch(url, {
+      method: init.method || "GET",
+      body: init.body,
       signal: ctrl.signal,
       mode: "cors",
       headers: headers || undefined,
@@ -665,10 +668,11 @@
     retry: document.getElementById("artRetry"),
     summary: document.getElementById("artSummary"),
     summaryText: document.getElementById("artSummaryText"),
+    sumAiBtn: document.getElementById("sumAiBtn"),
   };
 
   const articleCache = new Map(); // article link -> sanitized html
-  const artState = { link: null, viaPush: false };
+  const artState = { link: null, viaPush: false, extractive: "" };
 
   // Rendered cards by article link - lets card clicks transition to the
   // article view in place (pushState) instead of a full page load.
@@ -945,9 +949,15 @@
       saveArticleHtml(item.link, html);
       applyArticleBody(html);
       artEls.fallback.hidden = true;
-      const summary = extractSummary(item);
+      // summary: cached AI version wins, else the offline extractive one
+      const ai = loadAiSummary(item.link);
+      const summary = ai || extractSummary(item);
+      artState.extractive = ai ? extractSummary(item) : summary;
       artEls.summaryText.textContent = summary;
       artEls.summary.hidden = !summary;
+      artEls.sumAiBtn.disabled = false;
+      artEls.sumAiBtn.classList.remove("busy");
+      artEls.sumAiBtn.textContent = ai ? "↺ Bản rút trích" : "✨ Tóm tắt bằng AI";
     } else {
       // graceful degrade: lead image + sapo already shown above -
       // surface the explanation plus the always-visible full-article link
@@ -956,6 +966,92 @@
       artEls.summary.hidden = true;
     }
   }
+
+  // ---- AI summary (Pollinations, free & key-less, CORS-enabled) ----
+  const AI_TTL = 7 * 24 * 3600e3; // summaries rarely go stale - cache a week
+
+  function loadAiSummary(link) {
+    try {
+      const raw = localStorage.getItem("news24:ai:" + link);
+      if (!raw) return null;
+      const { t, text } = JSON.parse(raw);
+      if (!text || Date.now() - (t || 0) > AI_TTL) return null;
+      return text;
+    } catch {
+      return null;
+    }
+  }
+
+  function saveAiSummary(link, text) {
+    try {
+      localStorage.setItem(
+        "news24:ai:" + link,
+        JSON.stringify({ t: Date.now(), text })
+      );
+    } catch {}
+  }
+
+  async function aiSummarize(link) {
+    const body = (artEls.body.innerText || "").replace(/\s+/g, " ").trim();
+    if (body.length < 200) throw new Error("no body");
+    const content = body.slice(0, 6000);
+    const res = await fetchWithTimeout("https://text.pollinations.ai/", 60000, {
+      "Content-Type": "application/json",
+    }, {
+      method: "POST",
+      body: JSON.stringify({
+        model: "openai",
+        messages: [
+          {
+            role: "system",
+            content:
+              "Bạn là trợ lý tóm tắt tin tức. Tóm tắt bài báo thành 3-4 câu " +
+              "ngắn gọn, chắt lọc ý chính, bằng tiếng Việt. Chỉ trả về nội " +
+              "dung tóm tắt, không mở đầu, không liệt kê.",
+          },
+          { role: "user", content: content },
+        ],
+      }),
+    });
+    if (!res.ok) throw new Error("AI HTTP " + res.status);
+    const text = (await res.text()).trim();
+    if (!text || text.length < 20 || text.length > 1500) {
+      throw new Error("AI bad payload");
+    }
+    return text;
+  }
+
+  artEls.sumAiBtn.addEventListener("click", async () => {
+    const link = artState.link;
+    if (!link) return;
+    const showingAi = artEls.sumAiBtn.textContent.includes("rút trích");
+    if (showingAi) {
+      // toggle back to the offline extractive version
+      artEls.summaryText.textContent = artState.extractive || "";
+      artEls.sumAiBtn.textContent = "✨ Tóm tắt bằng AI";
+      return;
+    }
+    artEls.sumAiBtn.disabled = true;
+    artEls.sumAiBtn.classList.add("busy");
+    artEls.summaryText.textContent = "Đang tóm tắt bằng AI... (~10-15 giây)";
+    try {
+      const text = await aiSummarize(link);
+      if (artState.link !== link) return; // navigated away meanwhile
+      saveAiSummary(link, text);
+      artEls.summaryText.textContent = text;
+      artEls.sumAiBtn.textContent = "↺ Bản rút trích";
+    } catch (e) {
+      if (artState.link !== link) return;
+      artEls.summaryText.textContent =
+        artState.extractive || "Không tạo được tóm tắt.";
+      artEls.sumAiBtn.textContent = "✨ Thử lại AI";
+    } finally {
+      if (artState.link === link) {
+        artEls.sumAiBtn.disabled = false;
+        artEls.sumAiBtn.classList.remove("busy");
+      }
+    }
+  });
 
   function showBodyLoading() {
     artEls.fallback.hidden = true;

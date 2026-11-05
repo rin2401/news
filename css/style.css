@@ -918,3 +918,31 @@ body.modal-open { overflow: hidden; }
   line-height: 1.68;
   color: var(--text);
 }
+
+/* AI summary toggle inside the summary box */
+.art-summary-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sum-ai-btn {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--primary);
+  background: transparent;
+  border: 1px solid var(--primary);
+  border-radius: 999px;
+  padding: 4px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .15s, color .15s, opacity .15s;
+}
+
+.sum-ai-btn:hover { background: var(--primary); color: #fff; }
+
+.sum-ai-btn:disabled { opacity: .65; cursor: wait; }
+
+.sum-ai-btn.busy svg { width: 10px; height: 10px; }

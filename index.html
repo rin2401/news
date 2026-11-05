@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=10">
+  <link rel="stylesheet" href="css/style.css?v=11">
 </head>
 <body>
   <!-- Top header -->
@@ -91,7 +91,9 @@
         <img id="artLeadImg" alt="Ảnh minh họa" loading="lazy" referrerpolicy="no-referrer">
       </figure>
       <div class="art-summary" id="artSummary" hidden>
-        <div class="art-summary-label">📄 Tóm tắt</div>
+        <div class="art-summary-label"><span>📄 Tóm tắt</span>
+          <button class="sum-ai-btn" id="sumAiBtn" type="button">✨ Tóm tắt bằng AI</button>
+        </div>
         <p id="artSummaryText"></p>
       </div>
       <a class="reader-full-btn" id="artFullBtn" target="_blank" rel="noopener">
@@ -141,6 +143,6 @@
     </div>
   </template>
 
-  <script src="js/app.js?v=10"></script>
+  <script src="js/app.js?v=11"></script>
 </body>
 </html>
