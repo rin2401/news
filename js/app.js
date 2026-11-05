@@ -964,15 +964,29 @@
       saveArticleHtml(item.link, html);
       applyArticleBody(html);
       artEls.fallback.hidden = true;
-      // summary: cached AI version wins, else the offline extractive one
+      // summary: AI is the default method. The instant offline extractive
+      // version paints first as a placeholder, then the AI text swaps in
+      // when it arrives (or instantly from the 7-day cache on repeat views).
+      const extractive = extractSummary(item);
+      artState.extractive = extractive;
+      artEls.summaryText.textContent = extractive;
+      artEls.summary.hidden = !extractive;
       const ai = loadAiSummary(item.link);
-      const summary = ai || extractSummary(item);
-      artState.extractive = ai ? extractSummary(item) : summary;
-      artEls.summaryText.textContent = summary;
-      artEls.summary.hidden = !summary;
-      artEls.sumAiBtn.disabled = false;
-      artEls.sumAiBtn.classList.remove("busy");
-      artEls.sumAiBtn.textContent = ai ? "↺ Bản rút trích" : "✨ Tóm tắt bằng AI";
+      if (ai) {
+        artEls.summaryText.textContent = ai;
+        artEls.sumAiBtn.textContent = "↺ Bản rút trích";
+        artEls.sumAiBtn.disabled = false;
+        artEls.sumAiBtn.classList.remove("busy");
+      } else if (extractive) {
+        // kick off the AI summary in the background; busy button until done
+        artEls.sumAiBtn.disabled = true;
+        artEls.sumAiBtn.classList.add("busy");
+        artEls.sumAiBtn.textContent = "✨ Đang tóm tắt AI...";
+        runAiSummary(item.link);
+      } else {
+        artEls.sumAiBtn.disabled = true;
+        artEls.sumAiBtn.textContent = "✨ Tóm tắt bằng AI";
+      }
     } else {
       // graceful degrade: lead image + sapo already shown above -
       // surface the explanation plus the always-visible full-article link
@@ -1042,36 +1056,55 @@
     return text;
   }
 
-  artEls.sumAiBtn.addEventListener("click", async () => {
-    const link = artState.link;
-    if (!link) return;
-    const showingAi = artEls.sumAiBtn.textContent.includes("rút trích");
-    if (showingAi) {
-      // toggle back to the offline extractive version
-      artEls.summaryText.textContent = artState.extractive || "";
-      artEls.sumAiBtn.textContent = "✨ Tóm tắt bằng AI";
-      return;
-    }
-    artEls.sumAiBtn.disabled = true;
-    artEls.sumAiBtn.classList.add("busy");
-    artEls.summaryText.textContent = "Đang tóm tắt bằng AI... (~10-15 giây)";
+  // Background AI summary run (auto-triggered on render when not cached).
+  // One run per link at a time; on failure the extractive version stays
+  // visible and the button offers a manual retry.
+  let aiInFlight = null;
+  async function runAiSummary(link) {
+    if (aiInFlight === link) return;
+    aiInFlight = link;
     try {
       const text = await aiSummarize(link);
-      if (artState.link !== link) return; // navigated away meanwhile
-      saveAiSummary(link, text);
-      artEls.summaryText.textContent = text;
-      artEls.sumAiBtn.textContent = "↺ Bản rút trích";
+      saveAiSummary(link, text); // cache even if the user navigated away
+      if (artState.link === link) {
+        artEls.summaryText.textContent = text;
+        artEls.sumAiBtn.textContent = "↺ Bản rút trích";
+      }
     } catch (e) {
-      if (artState.link !== link) return;
-      artEls.summaryText.textContent =
-        artState.extractive || "Không tạo được tóm tắt.";
-      artEls.sumAiBtn.textContent = "✨ Thử lại AI";
+      if (artState.link === link) {
+        // keep the instant extractive summary on screen (rate limits:
+        // Pollinations free tier allows ~1 reply per 45s per IP)
+        artEls.sumAiBtn.textContent = "✨ Thử lại AI";
+      }
     } finally {
       if (artState.link === link) {
         artEls.sumAiBtn.disabled = false;
         artEls.sumAiBtn.classList.remove("busy");
       }
+      if (aiInFlight === link) aiInFlight = null;
     }
+  }
+
+  artEls.sumAiBtn.addEventListener("click", async () => {
+    const link = artState.link;
+    if (!link) return;
+    if (artEls.sumAiBtn.textContent.includes("rút trích")) {
+      // AI text is showing: toggle back to the offline extractive version
+      artEls.summaryText.textContent = artState.extractive || "";
+      artEls.sumAiBtn.textContent = "✨ Tóm tắt bằng AI";
+      return;
+    }
+    const cached = loadAiSummary(link);
+    if (cached) {
+      // previously generated, just not showing (user toggled back)
+      artEls.summaryText.textContent = cached;
+      artEls.sumAiBtn.textContent = "↺ Bản rút trích";
+      return;
+    }
+    artEls.sumAiBtn.disabled = true;
+    artEls.sumAiBtn.classList.add("busy");
+    artEls.sumAiBtn.textContent = "✨ Đang tóm tắt AI...";
+    await runAiSummary(link);
   });
 
   function showBodyLoading() {
