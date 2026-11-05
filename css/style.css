@@ -892,3 +892,29 @@ body.modal-open { overflow: hidden; }
 @media (max-width: 480px) {
   .art-h1 { font-size: 21px; }
 }
+
+/* Extractive summary box on article pages */
+.art-summary {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--primary);
+  border-radius: 8px;
+  padding: 13px 16px;
+  margin: 0 0 16px;
+}
+
+.art-summary-label {
+  font-size: 11.5px;
+  font-weight: 900;
+  letter-spacing: .6px;
+  text-transform: uppercase;
+  color: var(--primary);
+  margin-bottom: 6px;
+}
+
+.art-summary p {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.68;
+  color: var(--text);
+}

@@ -652,6 +652,8 @@
     origin: document.getElementById("artOrigin"),
     origin2: document.getElementById("artOrigin2"),
     retry: document.getElementById("artRetry"),
+    summary: document.getElementById("artSummary"),
+    summaryText: document.getElementById("artSummaryText"),
   };
 
   const articleCache = new Map(); // article link -> sanitized html
@@ -863,6 +865,39 @@
     }
   }
 
+  // Offline extractive summary: sapo-style lead is already shown above,
+  // so pick the first few real sentences of the body (skipping any that
+  // duplicate the sapo). Vietnamese abbreviations (GS.TS., UBND., ...)
+  // split prematurely, so merge fragments shorter than 30 chars forward.
+  function extractSummary(item) {
+    const text = (artEls.body.innerText || "").replace(/\s+/g, " ").trim();
+    if (text.length < 200) return "";
+    const parts = text.split(/(?<=[.!?…])\s+/);
+    const sentences = [];
+    for (const p of parts) {
+      const s = p.trim();
+      if (!s) continue;
+      const last = sentences[sentences.length - 1];
+      if (last !== undefined && last.length < 30) {
+        sentences[sentences.length - 1] = last + " " + s;
+      } else {
+        sentences.push(s);
+      }
+    }
+    const sapo = (item.sapo || "").trim();
+    const picked = [];
+    let len = 0;
+    for (const s of sentences) {
+      if (s.length < 40) continue; // headings / stray fragments
+      if (sapo && (s === sapo || s.includes(sapo) || sapo.includes(s))) continue;
+      picked.push(s);
+      len += s.length;
+      if (picked.length >= 4 || len >= 380) break;
+    }
+    if (!picked.length) return "";
+    return picked.join(" ") + (len >= 380 ? "…" : "");
+  }
+
   function renderArticle(item, fckOrHtml) {
     if (!item) {
       item = decorate({ title: "Bài viết", link: artState.link, pubDate: Date.now() }, "");
@@ -892,11 +927,15 @@
       articleCache.set(item.link, html);
       applyArticleBody(html);
       artEls.fallback.hidden = true;
+      const summary = extractSummary(item);
+      artEls.summaryText.textContent = summary;
+      artEls.summary.hidden = !summary;
     } else {
       // graceful degrade: lead image + sapo already shown above -
       // surface the explanation plus the always-visible full-article link
       artEls.body.innerHTML = "";
       artEls.fallback.hidden = false;
+      artEls.summary.hidden = true;
     }
   }
 
