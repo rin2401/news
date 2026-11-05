@@ -23,12 +23,17 @@ browser.
 
 ## How it works
 
-VnExpress RSS does not send CORS headers, so the browser cannot read it
-directly from a `github.io` origin. `js/app.js` therefore tries a chain of
-public CORS proxies in order and uses the first that responds:
+**Listings** read the same-origin snapshots in [`data/`](data/) —
+`data/<slug>.json` files written by `scripts/fetch-rss.mjs`, which a
+GitHub Action (`.github/workflows/fetch-rss.yml`) runs every 30 minutes
+with a browser User-Agent (VnExpress blocks bot UAs). No CORS, no
+third-party rate limits, survives public-proxy outages.
 
-1. `api.rss2json.com` (JSON wrapper; note its `pubDate` is UTC and is
-   converted back to local time, and its CDATA is XML-escaped so `&amp;`
+The **"Làm mới"** button and any missing snapshot fall back to a chain of
+public CORS proxies in the browser:
+
+1. `api.rss2json.com` (JSON wrapper; its `pubDate` is UTC and is
+   converted back to local time; its CDATA is XML-escaped so `&amp;`
    entities are decoded back to `&`)
 2. `api.allorigins.win/raw`
 3. `api.codetabs.com/v1/proxy`

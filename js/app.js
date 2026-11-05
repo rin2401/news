@@ -261,6 +261,34 @@
     });
   }
 
+  // Preferred source: same-origin JSON snapshots (data/<slug>.json)
+  // written every 30 minutes by the fetch-rss GitHub Action - no CORS,
+  // no third-party rate limits, immune to public-proxy outages.
+  async function fetchFeedLocal(slug) {
+    const res = await fetch("data/" + slug + ".json", { cache: "no-cache" });
+    if (!res.ok) throw new Error("local HTTP " + res.status);
+    const data = await res.json();
+    if (!data.items || !data.items.length) throw new Error("local empty");
+    return data.items.map((it) => decorate(it, slug));
+  }
+
+  async function loadFeed(slug, force) {
+    if (!force) {
+      try {
+        return await fetchFeedLocal(slug);
+      } catch {
+        /* fall through to proxies */
+      }
+    }
+    // Live refresh ("Làm mới") or snapshot missing: proxy chain, then
+    // fall back to whatever snapshot we have.
+    try {
+      return await fetchFeed(slug);
+    } catch {
+      return fetchFeedLocal(slug);
+    }
+  }
+
   // ------------------------------------------------------------------
   // Rendering
   // ------------------------------------------------------------------
@@ -414,7 +442,7 @@
 
   async function loadSidebar() {
     if (!sideLoad) {
-      sideLoad = fetchFeed(SIDEBAR_FEED)
+      sideLoad = loadFeed(SIDEBAR_FEED, false)
         .catch(() => {
           sideLoad = null;
           return [];
@@ -473,7 +501,7 @@
     els.refresh.classList.add("spinning");
     showStatus("", false);
     try {
-      const items = await fetchFeed(slug);
+      const items = await loadFeed(slug, opts.force);
       state.items = items;
       writeCache(slug, items);
       showStatus("", false);
