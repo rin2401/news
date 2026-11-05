@@ -219,12 +219,14 @@
     }
   }
 
-  function fetchWithTimeout(url, ms) {
+  function fetchWithTimeout(url, ms, headers) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), ms);
-    return fetch(url, { signal: ctrl.signal, mode: "cors" }).finally(() =>
-      clearTimeout(timer)
-    );
+    return fetch(url, {
+      signal: ctrl.signal,
+      mode: "cors",
+      headers: headers || undefined,
+    }).finally(() => clearTimeout(timer));
   }
 
   async function fetchFeed(slug) {
@@ -382,6 +384,7 @@
 
     const [first, ...rest] = items;
     const useFeatured = !state.query; // featured layout only in browse mode
+    registerItems(items);
     els.featured.innerHTML = useFeatured ? articleHtml(first, "featured") : "";
     const pageItems = useFeatured ? rest : items;
     els.list.innerHTML = pageItems
@@ -392,6 +395,7 @@
 
   function renderSidebar(items) {
     if (!items || !items.length) return;
+    registerItems(items);
     // Sidebar shows latest headlines, skipping what the main column
     // already displays for the current category.
     const seen = new Set(
@@ -586,6 +590,223 @@
         year: "numeric",
       });
   }
+
+  // ------------------------------------------------------------------
+  // In-page article reader
+  // ------------------------------------------------------------------
+  const readerEls = {
+    backdrop: document.getElementById("readerBackdrop"),
+    cat: document.getElementById("readerCat"),
+    title: document.getElementById("readerTitle"),
+    meta: document.getElementById("readerMeta"),
+    sapo: document.getElementById("readerSapo"),
+    body: document.getElementById("readerBody"),
+    fallback: document.getElementById("readerFallback"),
+    origin: document.getElementById("readerOrigin"),
+    origin2: document.getElementById("readerOrigin2"),
+    close: document.getElementById("readerClose"),
+    retry: document.getElementById("readerRetry"),
+  };
+
+  const itemIndex = new Map(); // article link -> decorated RSS item
+  function registerItems(items) {
+    (items || []).forEach((i) => itemIndex.set(i.link, i));
+  }
+
+  const articleCache = new Map(); // article link -> sanitized html
+  const readerState = { openLink: null };
+
+  const ARTICLE_HREF = /^https:\/\/vnexpress\.net\/[^?#]*-\d+\.html?$/i;
+  const ALLOWED_TOP = new Set([
+    "P", "H2", "H3", "H4", "FIGURE", "TABLE", "UL", "OL",
+    "BLOCKQUOTE", "IMG", "HR",
+  ]);
+  const STRIP_SELECTOR = [
+    "script", "style", "iframe", "form", "input", "button", "noscript",
+    "svg", "video", "audio", "object", "embed", "source", "h1",
+    "p.description", ".title-detail", ".author", "[class*='list-news']",
+    "[class*='box-']", "[class*='tag-']", "[class*='sidebar']",
+    "[class*='banner']", "[class*='newsletter']", "[class*='subscribe']",
+    "[class*='hidden']", "[class*='ad-']", "[id*='banner']",
+  ].join(",");
+
+  // Full-text fetch chain: jina (server-rendered HTML) first, then the
+  // same public proxies used for RSS. First source with a parsable
+  // .fck_detail wins.
+  async function fetchArticleHtml(url) {
+    const enc = encodeURIComponent(url);
+    const sources = [
+      {
+        name: "jina",
+        url: "https://r.jina.ai/" + url,
+        headers: { "X-Return-Format": "html" },
+      },
+      { name: "allorigins", url: "https://api.allorigins.win/raw?url=" + enc },
+      { name: "codetabs", url: "https://api.codetabs.com/v1/proxy?quest=" + enc },
+      { name: "corsproxy", url: "https://corsproxy.io/?url=" + enc },
+    ];
+    let lastErr = null;
+    for (const s of sources) {
+      try {
+        const res = await fetchWithTimeout(s.url, 20000, s.headers);
+        if (!res.ok) {
+          lastErr = new Error(s.name + " HTTP " + res.status);
+          continue;
+        }
+        const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+        const fck = doc.querySelector(".fck_detail");
+        if (fck && fck.textContent.trim().length > 200) {
+          return fck.cloneNode(true);
+        }
+        lastErr = new Error(s.name + " thin/missing fck_detail");
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw lastErr || new Error("article fetch failed");
+  }
+
+  // Turn a cloned .fck_detail into safe reader HTML:
+  // whitelist top-level tags, strip scripts/junk boxes, resolve
+  // lazy-loaded images (data-src), neutralize every other attribute.
+  function sanitizeArticle(rootClone) {
+    rootClone.querySelectorAll(STRIP_SELECTOR).forEach((n) => n.remove());
+
+    // unwrap <picture> so one plain <img> survives
+    rootClone.querySelectorAll("picture").forEach((pic) => {
+      const img = pic.querySelector("img");
+      if (img) pic.replaceWith(img);
+      else pic.remove();
+    });
+
+    // images: real URL may sit in data-src (lazy loading placeholder in src)
+    rootClone.querySelectorAll("img").forEach((img) => {
+      const real = decodeAmp(
+        img.getAttribute("data-src") || img.getAttribute("src") || ""
+      );
+      [...img.attributes].forEach((a) => img.removeAttribute(a.name));
+      if (/^https?:\/\//i.test(real)) {
+        img.setAttribute("src", real);
+        img.setAttribute("alt", "Ảnh minh họa");
+        img.setAttribute("loading", "lazy");
+        img.setAttribute("referrerpolicy", "no-referrer");
+        img.onerror = () => img.remove();
+      } else {
+        img.remove();
+      }
+    });
+
+    // links: keep only real http(s) hrefs, open them off-site
+    rootClone.querySelectorAll("a").forEach((a) => {
+      const href = decodeAmp(a.getAttribute("href") || "");
+      [...a.attributes].forEach((x) => a.removeAttribute(x.name));
+      if (/^https?:\/\//i.test(href)) {
+        a.setAttribute("href", href);
+        a.setAttribute("target", "_blank");
+        a.setAttribute("rel", "noopener");
+      } else {
+        a.replaceWith(...a.childNodes); // unwrap javascript:/anchor links
+      }
+    });
+
+    // everything else: drop attributes (styles, classes, trackers)
+    rootClone
+      .querySelectorAll(
+        "p,h2,h3,h4,figure,figcaption,table,thead,tbody,tfoot,tr,td,th,ul,ol,li,blockquote,hr,span,strong,em,b,i"
+      )
+      .forEach((el) => {
+        [...el.attributes].forEach((a) => el.removeAttribute(a.name));
+      });
+
+    const out = document.createElement("div");
+    [...rootClone.children].forEach((child) => {
+      if (!ALLOWED_TOP.has(child.tagName)) return;
+      const hasImg = child.querySelector("img");
+      if (!child.textContent.trim() && !hasImg) return; // skip empty blocks
+      out.appendChild(child);
+    });
+    return out.innerHTML;
+  }
+
+  function openReader(item) {
+    readerState.openLink = item.link;
+    readerEls.cat.textContent = item.cat;
+    readerEls.title.textContent = item.title;
+    readerEls.meta.textContent = timeAgo(item.pubDate) + " · nguồn VnExpress";
+    readerEls.sapo.textContent = item.sapo || "";
+    readerEls.sapo.style.display = item.sapo ? "" : "none";
+    readerEls.origin.href = readerEls.origin2.href = item.link;
+    readerEls.backdrop.hidden = false;
+    document.body.classList.add("modal-open");
+    loadReaderBody(item);
+  }
+
+  async function loadReaderBody(item) {
+    if (readerState.openLink !== item.link) return;
+    readerEls.fallback.hidden = true;
+    if (articleCache.has(item.link)) {
+      readerEls.body.innerHTML = articleCache.get(item.link);
+      return;
+    }
+    readerEls.body.innerHTML =
+      '<div class="rd-loading"><span class="rd-spinner"></span>Đang tải bài viết...</div>';
+    try {
+      const fck = await fetchArticleHtml(item.link);
+      const html = sanitizeArticle(fck);
+      if (!html || html.replace(/<[^>]*>/g, "").trim().length < 80) {
+        throw new Error("empty article");
+      }
+      articleCache.set(item.link, html);
+      if (readerState.openLink !== item.link) return;
+      readerEls.body.innerHTML = html;
+    } catch (e) {
+      if (readerState.openLink !== item.link) return;
+      // graceful degrade: show what the RSS gave us + explanation
+      readerEls.body.innerHTML = "";
+      const box = readerEls.fallback;
+      box.querySelectorAll("img").forEach((i) => i.remove());
+      box.hidden = false;
+      if (item.img) {
+        const im = document.createElement("img");
+        im.src = item.img;
+        im.setAttribute("referrerpolicy", "no-referrer");
+        im.onerror = () => im.remove();
+        box.prepend(im);
+      }
+    }
+  }
+
+  function closeReader() {
+    readerState.openLink = null;
+    readerEls.backdrop.hidden = true;
+    document.body.classList.remove("modal-open");
+  }
+
+  // Open the reader instead of a new tab when clicking an article card.
+  // Modified clicks still behave natively (open in new tab).
+  document.addEventListener("click", (e) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    const a = e.target.closest ? e.target.closest("a") : null;
+    if (!a) return;
+    const href = a.getAttribute("href") || "";
+    if (!ARTICLE_HREF.test(href)) return;
+    const item = itemIndex.get(href);
+    if (!item) return;
+    e.preventDefault();
+    openReader(item);
+  });
+
+  readerEls.close.addEventListener("click", closeReader);
+  readerEls.retry.addEventListener("click", () => {
+    const item = itemIndex.get(readerState.openLink);
+    if (item) loadReaderBody(item);
+  });
+  readerEls.backdrop.addEventListener("click", (e) => {
+    if (e.target === readerEls.backdrop) closeReader();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !readerEls.backdrop.hidden) closeReader();
+  });
 
   // ------------------------------------------------------------------
   // Boot
