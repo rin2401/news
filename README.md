@@ -59,6 +59,49 @@ python3 -m http.server 8000
 (Opening `index.html` via `file://` also works, but caching behavior is
 better over HTTP.)
 
+## MCP server (for AI agents)
+
+`scripts/mcp-server.mjs` is a **zero-dependency** MCP (Model Context
+Protocol) server over stdio. It lets any MCP client — ZCode, Claude
+Desktop, Claude Code, Cursor — read this site's news:
+
+| Tool | What it does |
+|---|---|
+| `list_news(category?, limit?)` | Recent headlines from the `data/` snapshots (refreshed every 30 min by the GitHub Action) |
+| `read_article(url)` | Full article **plain text**, fetched server-side **directly from vnexpress.net** with a browser User-Agent — no CORS, no public-proxy chain, no browser-side rate limits. Detects interactive/quiz articles whose body only exists client-side |
+| `search_news(query, limit?)` | Case-insensitive search over titles + lead paragraphs |
+
+Requirements: **Node.js ≥ 18**, nothing else (no `npm install`).
+
+### Adding it
+
+**ZCode** — nothing to do: the workspace config in `.zcode/config.json`
+(fallback `.agents/mcp.json`) is committed to this repo, so cloning it and
+opening the folder auto-connects the `news24` MCP server.
+
+**Claude Code / Cursor** — same: `.mcp.json` is committed at the repo root,
+clone and approve the server.
+
+**Claude Desktop / manual** — add to your client's MCP config:
+
+```json
+{
+  "mcpServers": {
+    "news24": { "command": "node", "args": ["<repo>/scripts/mcp-server.mjs"] }
+  }
+}
+```
+
+Quick smoke test without any client:
+
+```bash
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}' \
+  '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_news","arguments":{"limit":3}}}' \
+  | node scripts/mcp-server.mjs
+```
+
 ## Structure
 
 ```

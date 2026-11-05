@@ -1,0 +1,10 @@
+{
+  "mcp": {
+    "servers": {
+      "news24": {
+        "command": "node",
+        "args": ["scripts/mcp-server.mjs"]
+      }
+    }
+  }
+}
