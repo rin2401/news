@@ -663,7 +663,10 @@
     fullBtn: document.getElementById("artFullBtn"),
     body: document.getElementById("artBody"),
     fallback: document.getElementById("artFallback"),
+    fallbackMsg: document.getElementById("artFallbackMsg"),
+    fallbackQuiz: document.getElementById("artFallbackQuiz"),
     origin: document.getElementById("artOrigin"),
+    originQuiz: document.getElementById("artOriginQuiz"),
     origin2: document.getElementById("artOrigin2"),
     retry: document.getElementById("artRetry"),
     summary: document.getElementById("artSummary"),
@@ -715,40 +718,52 @@
     "[id*='banner']",
   ].join(",");
 
-  // Full-text fetch chain: jina (server-rendered HTML) first, then the
-  // same public proxies used for RSS. First source with a parsable
-  // .fck_detail wins.
+  // Full-text fetch chain: jina (server-rendered HTML) goes first alone -
+  // fast and clean, but rate-limited. When it fails, the remaining public
+  // proxies race in parallel so one slow/hung source cannot drag out the
+  // whole chain (allorigins often needs 5-10s; corsproxy.io died in 2026
+  // and serves its own landing page instead).
   async function fetchArticleHtml(url) {
+    const trySource = async (name, srcUrl, ms, headers) => {
+      const res = await fetchWithTimeout(srcUrl, ms, headers);
+      if (!res.ok) throw new Error(name + " HTTP " + res.status);
+      const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+      const fck = doc.querySelector(".fck_detail");
+      if (fck) {
+        if (fck.textContent.trim().length > 200) return fck.cloneNode(true);
+        // quiz/poll/live template: the body is a client-side widget
+        // (data-component-type / data-widget placeholder) - VnExpress's own
+        // JS renders it, so NO proxy can ever return it as static HTML
+        if (fck.querySelector("[data-component-type], [data-widget]")) {
+          const err = new Error(name + " interactive-only article");
+          err.interactive = true;
+          throw err;
+        }
+      }
+      throw new Error(name + " thin/missing fck_detail");
+    };
     const enc = encodeURIComponent(url);
-    const sources = [
-      {
-        name: "jina",
-        url: "https://r.jina.ai/" + url,
-        headers: { "X-Return-Format": "html" },
-      },
-      { name: "allorigins", url: "https://api.allorigins.win/raw?url=" + enc },
-      { name: "codetabs", url: "https://api.codetabs.com/v1/proxy?quest=" + enc },
-      { name: "corsproxy", url: "https://corsproxy.io/?url=" + enc },
-    ];
-    let lastErr = null;
-    for (const s of sources) {
+    try {
+      // jina alone: usual case resolves in ~1-2s
+      return await trySource(
+        "jina", "https://r.jina.ai/" + url, 12000,
+        { "X-Return-Format": "html" }
+      );
+    } catch (e) {
+      // interactive widget: no source can help, skip the proxy race
+      if (e.interactive) throw e;
+      // rate-limited or down: race the fallbacks, first valid body wins
+      const fallbacks = [
+        trySource("allorigins", "https://api.allorigins.win/raw?url=" + enc, 25000),
+        trySource("codetabs", "https://api.codetabs.com/v1/proxy?quest=" + enc, 25000),
+      ];
       try {
-        const res = await fetchWithTimeout(s.url, 20000, s.headers);
-        if (!res.ok) {
-          lastErr = new Error(s.name + " HTTP " + res.status);
-          continue;
-        }
-        const doc = new DOMParser().parseFromString(await res.text(), "text/html");
-        const fck = doc.querySelector(".fck_detail");
-        if (fck && fck.textContent.trim().length > 200) {
-          return fck.cloneNode(true);
-        }
-        lastErr = new Error(s.name + " thin/missing fck_detail");
-      } catch (e) {
-        lastErr = e;
+        return await Promise.any(fallbacks);
+      } catch (agg) {
+        const inter = (agg.errors || []).find((x) => x && x.interactive);
+        throw inter || agg;
       }
     }
-    throw lastErr || new Error("article fetch failed");
   }
 
   // Turn a cloned .fck_detail into safe reader HTML:
@@ -936,7 +951,7 @@
     artEls.fullBtn.href = artEls.origin.href = artEls.origin2.href = item.link;
   }
 
-  function renderArticleBody(item, fckOrHtml) {
+  function renderArticleBody(item, fckOrHtml, err) {
     let html = null;
     if (typeof fckOrHtml === "string") {
       html = fckOrHtml;
@@ -964,6 +979,12 @@
       artEls.body.innerHTML = "";
       artEls.fallback.hidden = false;
       artEls.summary.hidden = true;
+      const quiz = !!(err && err.interactive);
+      if (artEls.fallbackMsg) artEls.fallbackMsg.hidden = quiz;
+      if (artEls.fallbackQuiz) {
+        artEls.fallbackQuiz.hidden = !quiz;
+        if (quiz) artEls.originQuiz.href = item.link;
+      }
     }
   }
 
@@ -1111,9 +1132,9 @@
         if (artState.link !== item.link) return;
         renderArticleBody(item, html);
       })
-      .catch(() => {
+      .catch((err) => {
         if (artState.link !== item.link) return;
-        renderArticleBody(item, null);
+        renderArticleBody(item, null, err);
       });
   }
 
@@ -1143,6 +1164,7 @@
     if (artState.link !== link) return; // user navigated away meanwhile
     let item = itemRes.status === "fulfilled" ? itemRes.value : null;
     const fck = fckRes.status === "fulfilled" ? fckRes.value : null;
+    const fckErr = fckRes.status === "rejected" ? fckRes.reason : null;
     if (!item && fck) {
       item = itemFromArticle(fck, link);
     }
@@ -1150,7 +1172,7 @@
       item = decorate({ title: "Bài viết", link, pubDate: Date.now() }, "");
     }
     renderArticleHeader(item);
-    renderArticleBody(item, html || fck);
+    renderArticleBody(item, html || fck, fckErr);
   }
 
   // Card clicks (list + sidebar) with plain slug.html hrefs become

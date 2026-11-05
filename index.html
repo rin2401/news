@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=11">
+  <link rel="stylesheet" href="css/style.css?v=12">
 </head>
 <body>
   <!-- Top header -->
@@ -100,9 +100,12 @@
         Đọc bản đầy đủ trên VnExpress ↗</a>
       <div class="reader-body" id="artBody"></div>
       <div class="reader-fallback" id="artFallback" hidden>
-        <p>Không tải được toàn văn bài viết (mạng chặn hoặc máy chủ giới hạn). Bạn có thể
+        <p id="artFallbackMsg">Không tải được toàn văn bài viết (mạng chặn hoặc máy chủ giới hạn). Bạn có thể
           <span class="retry" id="artRetry">thử lại</span> hoặc
           <a id="artOrigin" target="_blank" rel="noopener">đọc bản gốc trên VnExpress</a>.</p>
+        <p id="artFallbackQuiz" hidden>Đây là bài <strong>tương tác / đố vui</strong> của VnExpress —
+          nội dung chạy bằng chương trình riêng của họ nên không thể tải toàn văn. Bạn có thể
+          <a id="artOriginQuiz" target="_blank" rel="noopener">chơi thử bản gốc trên VnExpress</a>.</p>
       </div>
       <footer class="reader-foot">
         <p class="reader-source">Nội dung thuộc bản quyền VnExpress —
@@ -143,6 +146,6 @@
     </div>
   </template>
 
-  <script src="js/app.js?v=11"></script>
+  <script src="js/app.js?v=12"></script>
 </body>
 </html>
