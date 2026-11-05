@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>News24 - Đọc báo nhanh 24h từ VnExpress RSS</title>
+  <meta name="description" content="Trang đọc báo tổng hợp nhanh 24h, lấy tin trực tiếp từ RSS VnExpress: thời sự, thế giới, kinh doanh, thể thao, công nghệ, giải trí...">
+  <meta name="theme-color" content="#ed1c24">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css?v=6">
+</head>
+<body>
+  <!-- Top header -->
+  <header class="top-header">
+    <div class="container header-inner">
+      <a class="brand" href="./" aria-label="News24 - Trang chủ">
+        <span class="brand-mark">News</span><span class="brand-sub">24</span>
+        <span class="brand-tagline">Đọc báo nhanh 24h</span>
+      </a>
+      <div class="header-tools">
+        <span class="today" id="today"></span>
+        <div class="search-box">
+          <svg viewBox="0 0 24 24" class="icon-search" aria-hidden="true"><path d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>
+          <input type="search" id="searchInput" placeholder="Tìm kiếm tin tức..." autocomplete="off">
+        </div>
+        <button class="theme-toggle" id="themeToggle" type="button" title="Chế độ tối/sáng" aria-label="Chuyển chế độ tối/sáng">
+          <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg>
+          <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7a5 5 0 1 0 5 5 5 5 0 0 0-5-5zm0-5 2.5 4h-5L12 2zm0 20-2.5-4h5L12 22zM2 12l4-2.5v5L2 12zm20 0-4 2.5v-5l4 2.5z"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Category nav -->
+  <nav class="cat-nav" id="catNav">
+    <div class="container nav-scroll">
+      <a class="nav-link" data-slug="tin-moi-nhat">Tin mới nhất</a>
+      <a class="nav-link" data-slug="thoi-su">Thời sự</a>
+      <a class="nav-link" data-slug="the-gioi">Thế giới</a>
+      <a class="nav-link" data-slug="kinh-doanh">Kinh doanh</a>
+      <a class="nav-link" data-slug="bat-dong-san">Bất động sản</a>
+      <a class="nav-link" data-slug="the-thao">Thể thao</a>
+      <a class="nav-link" data-slug="giai-tri">Giải trí</a>
+      <a class="nav-link" data-slug="suc-khoe">Sức khỏe</a>
+      <a class="nav-link" data-slug="giao-duc">Giáo dục</a>
+      <a class="nav-link" data-slug="du-lich">Du lịch</a>
+      <a class="nav-link" data-slug="phap-luat">Pháp luật</a>
+      <button class="refresh-btn" id="refreshBtn" type="button" title="Làm mới tin">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A8 8 0 1 0 19.73 14h-2.08a6 6 0 1 1-1.41-6.24L13 11h7V4l-2.35 2.35z"/></svg>
+        Làm mới
+      </button>
+    </div>
+  </nav>
+
+  <!-- Main: list view + article view share the sidebar -->
+  <main class="container layout">
+    <section class="main-col" id="viewList">
+      <div class="col-header">
+        <h1 class="col-title" id="colTitle">Tin mới nhất</h1>
+        <span class="col-meta" id="colMeta"></span>
+      </div>
+
+      <div id="statusBar" class="status-bar" hidden></div>
+
+      <div id="featuredSlot" class="featured-slot"></div>
+
+      <div id="newsList" class="news-list" aria-live="polite"></div>
+
+      <div id="skeletons" class="news-list">
+        <!-- skeleton rows injected by JS -->
+      </div>
+
+      <div class="load-more-wrap">
+        <button id="loadMoreBtn" class="load-more" type="button" hidden>Xem thêm tin</button>
+      </div>
+    </section>
+
+    <!-- Article view: rendered for /news/<slug>.html URLs (see 404.html) -->
+    <section class="main-col" id="viewArticle" hidden>
+      <a class="back-link" href="./">← Quay lại tin tức</a>
+      <div class="col-header">
+        <h1 class="col-title" id="artCat">Bài viết</h1>
+        <span class="col-meta" id="artTime"></span>
+      </div>
+      <h1 class="art-h1" id="artTitle"></h1>
+      <p class="art-sapo" id="artSapo"></p>
+      <figure class="reader-lead" id="artLead" hidden>
+        <img id="artLeadImg" alt="Ảnh minh họa" loading="lazy" referrerpolicy="no-referrer">
+      </figure>
+      <a class="reader-full-btn" id="artFullBtn" target="_blank" rel="noopener">
+        Đọc bản đầy đủ trên VnExpress ↗</a>
+      <div class="reader-body" id="artBody"></div>
+      <div class="reader-fallback" id="artFallback" hidden>
+        <p>Không tải được toàn văn bài viết (mạng chặn hoặc máy chủ giới hạn). Bạn có thể
+          <span class="retry" id="artRetry">thử lại</span> hoặc
+          <a id="artOrigin" target="_blank" rel="noopener">đọc bản gốc trên VnExpress</a>.</p>
+      </div>
+      <footer class="reader-foot">
+        <p class="reader-source">Nội dung thuộc bản quyền VnExpress —
+          <a id="artOrigin2" target="_blank" rel="noopener">xem bản gốc</a></p>
+      </footer>
+    </section>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="side-box">
+        <h2 class="side-title">
+          <span class="side-bar"></span>Tin được quan tâm
+        </h2>
+        <div id="sideList" class="side-list"></div>
+      </div>
+      <div class="side-box side-about">
+        <h2 class="side-title"><span class="side-bar"></span>Về trang này</h2>
+        <p>News24 tổng hợp tin tức nhanh <strong>24 giờ</strong> qua RSS của <a href="https://vnexpress.net" target="_blank" rel="noopener">VnExpress</a>. Mọi bài viết thuộc bản quyền VnExpress — nhấn vào tiêu đề để đọc bản gốc.</p>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="footer">
+    <div class="container">
+      <p><strong>News24</strong> — demo đọc báo từ VnExpress RSS · <a href="https://vnexpress.net/rss/tin-moi-nhat.rss" target="_blank" rel="noopener">Nguồn RSS</a></p>
+      <p class="footer-dim">© 2026 News24 — dự án cá nhân, không liên kết với VnExpress. Nội dung thuộc bản quyền VnExpress.</p>
+    </div>
+  </footer>
+
+  <template id="tplSkeleton">
+    <div class="skeleton-row">
+      <div class="skeleton-thumb"></div>
+      <div class="skeleton-lines">
+        <div class="sk-line" style="width:92%"></div>
+        <div class="sk-line" style="width:70%"></div>
+        <div class="sk-line" style="width:40%"></div>
+      </div>
+    </div>
+  </template>
+
+  <script src="js/app.js?v=6"></script>
+</body>
+</html>

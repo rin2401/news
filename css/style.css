@@ -859,3 +859,36 @@ body.modal-open { overflow: hidden; }
   background: var(--primary);
   color: #fff;
 }
+
+/* ============ Article page view (/news/<slug>.html) ============ */
+.back-link {
+  display: inline-block;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--primary);
+  margin: 6px 0 12px;
+}
+
+.back-link:hover { text-decoration: underline; }
+
+.art-h1 {
+  font-family: var(--font-title);
+  font-size: 26px;
+  font-weight: 900;
+  line-height: 1.32;
+  margin: 4px 0 10px;
+  color: var(--text);
+}
+
+.art-sapo {
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--text-2);
+  border-left: 3px solid var(--primary);
+  padding-left: 12px;
+  margin: 0 0 18px;
+}
+
+@media (max-width: 480px) {
+  .art-h1 { font-size: 21px; }
+}

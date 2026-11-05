@@ -341,6 +341,9 @@
 
   function articleHtml(it, variant) {
     // Build markup with escaped text; img src validated as http(s) upstream.
+    // Cards point at the local slug.html page (VnExpress-style URLs),
+    // served via 404.html on GitHub Pages.
+    const href = escapeAttr(relativeSlug(it.link));
     const img = it.img
       ? '<img src="' + escapeAttr(it.img) + '" alt="' + escapeAttr(it.title) +
         '" loading="lazy" referrerpolicy="no-referrer" onerror="this.src=this.dataset.ph" data-ph="' +
@@ -353,7 +356,7 @@
     if (variant === "featured") {
       return (
         '<a class="article-featured' + (it.img ? "" : " no-img") +
-        '" href="' + escapeAttr(it.link) + '" target="_blank" rel="noopener">' +
+        '" href="' + href + '">' +
         (it.img ? '<div class="thumb-featured">' + img + "</div>" : "") +
         '<h2 class="a-title">' + safeText(it.title) + "</h2>" +
         (it.sapo ? '<p class="a-sapo">' + safeText(it.sapo) + "</p>" : "") +
@@ -364,7 +367,7 @@
     if (variant === "side") {
       return (
         '<a class="side-item' + (it.img ? "" : " no-img") +
-        '" href="' + escapeAttr(it.link) + '" target="_blank" rel="noopener">' +
+        '" href="' + href + '">' +
         (it.img ? '<div class="side-thumb">' + img + "</div>" : "") +
         "<div><h3 class=\"a-title\">" + safeText(it.title) + "</h3>" +
         '<div class="a-meta">' + timeAgo(it.pubDate) + "</div></div></a>"
@@ -372,7 +375,7 @@
     }
     return (
       '<a class="news-item' + (it.img ? "" : " no-img") +
-      '" href="' + escapeAttr(it.link) + '" target="_blank" rel="noopener">' +
+      '" href="' + href + '">' +
       (it.img ? '<div class="thumb">' + img + "</div>" : "") +
       '<div class="news-body"><h3 class="a-title">' + safeText(it.title) +
       "</h3>" +
@@ -412,7 +415,6 @@
 
     const [first, ...rest] = items;
     const useFeatured = !state.query; // featured layout only in browse mode
-    registerItems(items);
     els.featured.innerHTML = useFeatured ? articleHtml(first, "featured") : "";
     const pageItems = useFeatured ? rest : items;
     els.list.innerHTML = pageItems
@@ -423,7 +425,6 @@
 
   function renderSidebar(items) {
     if (!items || !items.length) return;
-    registerItems(items);
     // Sidebar shows latest headlines, skipping what the main column
     // already displays for the current category.
     const seen = new Set(
@@ -552,10 +553,16 @@
     const link = e.target.closest(".nav-link");
     if (!link) return;
     e.preventDefault();
+    if (currentSlug()) {
+      // from an article page, navigate back to the list view
+      location.href = "./#/" + link.dataset.slug;
+      return;
+    }
     loadSlug(link.dataset.slug);
   });
 
   window.addEventListener("hashchange", () => {
+    if (currentSlug()) return; // hash on an article URL is meaningless
     loadSlug(slugFromHash());
   });
 
@@ -565,12 +572,20 @@
   });
 
   els.search.addEventListener("input", () => {
+    if (currentSlug()) {
+      location.href = "./"; // search only makes sense on the list view
+      return;
+    }
     state.query = els.search.value;
     state.shown = PAGE_SIZE;
     renderMain();
   });
 
   els.refresh.addEventListener("click", () => {
+    if (currentSlug()) {
+      location.reload();
+      return;
+    }
     loadSlug(state.slug, { force: true });
   });
 
@@ -620,34 +635,46 @@
   }
 
   // ------------------------------------------------------------------
-  // In-page article reader
+  // Article pages (/news/<slug>.html - VnExpress-style slugs)
   // ------------------------------------------------------------------
-  const readerEls = {
-    backdrop: document.getElementById("readerBackdrop"),
-    cat: document.getElementById("readerCat"),
-    title: document.getElementById("readerTitle"),
-    meta: document.getElementById("readerMeta"),
-    sapo: document.getElementById("readerSapo"),
-    body: document.getElementById("readerBody"),
-    fallback: document.getElementById("readerFallback"),
-    origin: document.getElementById("readerOrigin"),
-    origin2: document.getElementById("readerOrigin2"),
-    close: document.getElementById("readerClose"),
-    retry: document.getElementById("readerRetry"),
-    lead: document.getElementById("readerLead"),
-    leadImg: document.getElementById("readerLeadImg"),
-    fullBtn: document.getElementById("readerFullBtn"),
+  const artEls = {
+    view: document.getElementById("viewArticle"),
+    listView: document.getElementById("viewList"),
+    cat: document.getElementById("artCat"),
+    time: document.getElementById("artTime"),
+    title: document.getElementById("artTitle"),
+    sapo: document.getElementById("artSapo"),
+    lead: document.getElementById("artLead"),
+    leadImg: document.getElementById("artLeadImg"),
+    fullBtn: document.getElementById("artFullBtn"),
+    body: document.getElementById("artBody"),
+    fallback: document.getElementById("artFallback"),
+    origin: document.getElementById("artOrigin"),
+    origin2: document.getElementById("artOrigin2"),
+    retry: document.getElementById("artRetry"),
   };
 
-  const itemIndex = new Map(); // article link -> decorated RSS item
-  function registerItems(items) {
-    (items || []).forEach((i) => itemIndex.set(i.link, i));
+  const articleCache = new Map(); // article link -> sanitized html
+  const artState = { link: null };
+
+  // VnExpress slugs end in "-<id>.html", e.g.
+  // /news/thuoc-ung-thu-qua-dat-5141250.html
+  function currentSlug() {
+    const m = /\/((?:[a-z0-9]+-)+\d+)\.html?$/i.exec(decodeURI(location.pathname));
+    return m ? m[1] : null;
   }
 
-  const articleCache = new Map(); // article link -> sanitized html
-  const readerState = { openLink: null };
+  // Cards link to the slug.html path (served by 404.html on GitHub Pages)
+  function relativeSlug(link) {
+    const m = /^https:\/\/vnexpress\.net\/(.+\.html)$/.exec(link || "");
+    return m ? m[1] : link || "#";
+  }
 
-  const ARTICLE_HREF = /^https:\/\/vnexpress\.net\/[^?#]*-\d+\.html?$/i;
+  function showView(name) {
+    artEls.listView.hidden = name !== "list";
+    artEls.view.hidden = name !== "article";
+  }
+
   const ALLOWED_TOP = new Set([
     "P", "H2", "H3", "H4", "FIGURE", "TABLE", "UL", "OL",
     "BLOCKQUOTE", "IMG", "HR",
@@ -773,39 +800,50 @@
     }
   }
 
-  function openReader(item) {
-    readerState.openLink = item.link;
-    readerEls.cat.textContent = item.cat;
-    readerEls.title.textContent = item.title;
-    readerEls.meta.textContent = timeAgo(item.pubDate) + " · nguồn VnExpress";
-    readerEls.sapo.textContent = item.sapo || "";
-    readerEls.sapo.style.display = item.sapo ? "" : "none";
-    // Lead image straight under the headline (VnExpress-style) so the
-    // title and its photo never drift apart on text-heavy articles.
-    if (item.img) {
-      readerEls.leadImg.src = item.img;
-      readerEls.lead.hidden = false;
-    } else {
-      readerEls.lead.hidden = true;
+  // Find the RSS item (title, photo, sapo, category, time) behind a slug
+  // by scanning the same-origin snapshots.
+  async function findItemData(slug) {
+    const suffix = "/" + slug + ".html";
+    const results = await Promise.allSettled(
+      Object.keys(CATEGORIES).map((catSlug) =>
+        fetch("data/" + catSlug + ".json", { cache: "no-cache" })
+          .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
+          .then((d) => ({ catSlug, items: d.items || [] }))
+      )
+    );
+    for (const r of results) {
+      if (r.status !== "fulfilled" || !r.value) continue;
+      const found = r.value.items.find((it) => (it.link || "").endsWith(suffix));
+      if (found) return decorate(found, r.value.catSlug);
     }
-    readerEls.lead
-      .querySelectorAll("figcaption")
-      .forEach((c) => c.remove()); // stale credit from a previous article
-    readerEls.fullBtn.href = item.link;
-    readerEls.origin.href = readerEls.origin2.href = item.link;
-    readerEls.backdrop.hidden = false;
-    document.body.classList.add("modal-open");
-    loadReaderBody(item);
+    return null;
   }
 
-  // Render fetched article HTML; when the body's first photo is the same
-  // file as the lead image shown under the headline, remove the inline
-  // copy and move its credit under the lead.
-  function applyReaderBody(html) {
-    readerEls.body.innerHTML = html;
-    if (readerEls.lead.hidden) return;
-    const leadName = urlBasename(readerEls.leadImg.getAttribute("src"));
-    const first = readerEls.body.querySelector("img");
+  // Snapshot may have rotated past an older article - pull title/sapo
+  // straight out of the fetched article HTML instead.
+  function itemFromArticle(fck, link) {
+    const titleEl = fck.querySelector(".title-detail, h1");
+    const sapoEl = fck.querySelector("p.description");
+    return decorate(
+      {
+        title: titleEl ? titleEl.textContent.trim() : "Bài viết",
+        link,
+        pubDate: Date.now(),
+        img: "",
+        sapo: sapoEl ? sapoEl.textContent.trim() : "",
+      },
+      ""
+    );
+  }
+
+  // Render body html; when the body's first photo is the same file as
+  // the lead image under the headline, drop the inline copy and move
+  // its credit under the lead.
+  function applyArticleBody(html) {
+    artEls.body.innerHTML = html;
+    if (artEls.lead.hidden) return;
+    const leadName = urlBasename(artEls.leadImg.getAttribute("src"));
+    const first = artEls.body.querySelector("img");
     if (!first || urlBasename(first.getAttribute("src")) !== leadName) return;
     const fig = first.closest("figure");
     const cap = fig ? fig.querySelector("figcaption") : null;
@@ -815,73 +853,112 @@
     if (capText) {
       const leadCap = document.createElement("figcaption");
       leadCap.textContent = capText;
-      readerEls.lead.appendChild(leadCap);
+      artEls.lead.appendChild(leadCap);
     }
   }
 
-  async function loadReaderBody(item) {
-    if (readerState.openLink !== item.link) return;
-    readerEls.fallback.hidden = true;
-    if (articleCache.has(item.link)) {
-      applyReaderBody(articleCache.get(item.link));
+  function renderArticle(item, fckOrHtml) {
+    if (!item) {
+      item = decorate({ title: "Bài viết", link: artState.link, pubDate: Date.now() }, "");
+    }
+    document.title = item.title + " - News24";
+    artEls.cat.textContent = item.cat || "Tin tức";
+    artEls.title.textContent = item.title;
+    artEls.time.textContent = timeAgo(item.pubDate) + " · nguồn VnExpress";
+    artEls.sapo.textContent = item.sapo || "";
+    artEls.lead.querySelectorAll("figcaption").forEach((c) => c.remove());
+    if (item.img) {
+      artEls.leadImg.src = item.img;
+      artEls.lead.hidden = false;
+    } else {
+      artEls.lead.hidden = true;
+    }
+    artEls.fullBtn.href = artEls.origin.href = artEls.origin2.href = item.link;
+
+    let html = null;
+    if (typeof fckOrHtml === "string") {
+      html = fckOrHtml;
+    } else if (fckOrHtml) {
+      html = sanitizeArticle(fckOrHtml);
+    }
+    const textLen = html ? html.replace(/<[^>]*>/g, "").trim().length : 0;
+    if (html && textLen >= 80) {
+      articleCache.set(item.link, html);
+      applyArticleBody(html);
+      artEls.fallback.hidden = true;
+    } else {
+      // graceful degrade: lead image + sapo already shown above -
+      // surface the explanation plus the always-visible full-article link
+      artEls.body.innerHTML = "";
+      artEls.fallback.hidden = false;
+    }
+  }
+
+  async function loadArticle(slug) {
+    const link = "https://vnexpress.net/" + slug + ".html";
+    artState.link = link;
+    showView("article");
+    window.scrollTo(0, 0);
+    artEls.title.textContent = "Đang tải bài viết...";
+    artEls.cat.textContent = "Bài viết";
+    artEls.time.textContent = "";
+    artEls.sapo.textContent = "";
+    artEls.lead.hidden = true;
+    artEls.fullBtn.href = artEls.origin.href = artEls.origin2.href = link;
+    artEls.fallback.hidden = true;
+    artEls.body.innerHTML =
+      '<div class="rd-loading"><span class="rd-spinner"></span>Đang tải bài viết...</div>';
+
+    let fck = null;
+    if (articleCache.has(link)) {
+      const item = await findItemData(slug);
+      if (artState.link !== link) return;
+      renderArticle(item, articleCache.get(link));
       return;
     }
-    readerEls.body.innerHTML =
-      '<div class="rd-loading"><span class="rd-spinner"></span>Đang tải bài viết...</div>';
-    try {
-      const fck = await fetchArticleHtml(item.link);
-      const html = sanitizeArticle(fck);
-      if (!html || html.replace(/<[^>]*>/g, "").trim().length < 80) {
-        throw new Error("empty article");
-      }
-      articleCache.set(item.link, html);
-      if (readerState.openLink !== item.link) return;
-      applyReaderBody(html);
-    } catch (e) {
-      if (readerState.openLink !== item.link) return;
-      // graceful degrade: lead image + sapo are already shown above,
-      // just surface the explanation and the full-article link
-      readerEls.body.innerHTML = "";
-      readerEls.fallback.hidden = false;
+    const [itemRes, fckRes] = await Promise.allSettled([
+      findItemData(slug),
+      fetchArticleHtml(link),
+    ]);
+    if (artState.link !== link) return; // user navigated away meanwhile
+    let item = itemRes.status === "fulfilled" ? itemRes.value : null;
+    fck = fckRes.status === "fulfilled" ? fckRes.value : null;
+    if (!item && fck) {
+      item = itemFromArticle(fck, link);
     }
+    renderArticle(item, fck);
   }
 
-  function closeReader() {
-    readerState.openLink = null;
-    readerEls.backdrop.hidden = true;
-    document.body.classList.remove("modal-open");
-  }
-
-  // Open the reader instead of a new tab when clicking an article card.
-  // Modified clicks still behave natively (open in new tab).
-  document.addEventListener("click", (e) => {
-    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-    const a = e.target.closest ? e.target.closest("a") : null;
-    if (!a) return;
-    const href = a.getAttribute("href") || "";
-    if (!ARTICLE_HREF.test(href)) return;
-    const item = itemIndex.get(href);
-    if (!item) return;
-    e.preventDefault();
-    openReader(item);
-  });
-
-  readerEls.close.addEventListener("click", closeReader);
-  readerEls.retry.addEventListener("click", () => {
-    const item = itemIndex.get(readerState.openLink);
-    if (item) loadReaderBody(item);
-  });
-  readerEls.backdrop.addEventListener("click", (e) => {
-    if (e.target === readerEls.backdrop) closeReader();
-  });
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !readerEls.backdrop.hidden) closeReader();
+  artEls.retry.addEventListener("click", () => {
+    if (artState.link) {
+      articleCache.delete(artState.link);
+      const slug = currentSlug();
+      if (slug) loadArticle(slug);
+    }
   });
 
   // ------------------------------------------------------------------
   // Boot
   // ------------------------------------------------------------------
-  renderToday();
-  setInterval(renderToday, 60000);
-  loadSlug(slugFromHash());
+  function boot() {
+    renderToday();
+    setInterval(renderToday, 60000);
+    const slug = currentSlug();
+    if (slug) {
+      // /news/<slug>.html - this page was served by the root 404.html
+      loadArticle(slug);
+      loadSidebar();
+      return;
+    }
+    if (!/(^|\/)index\.html?$/.test(location.pathname) && !/\/$/.test(location.pathname)) {
+      // 404.html served for a path that is neither the index nor an
+      // article slug - bounce back to the app root
+      location.replace(location.pathname.indexOf("/news/") === 0 ? "/news/" : "/");
+      return;
+    }
+    loadSlug(slugFromHash());
+    loadSidebar();
+  }
+
+  boot();
 })();

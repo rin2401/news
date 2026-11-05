@@ -10,13 +10,13 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=5">
+  <link rel="stylesheet" href="css/style.css?v=6">
 </head>
 <body>
   <!-- Top header -->
   <header class="top-header">
     <div class="container header-inner">
-      <a class="brand" href="#/tin-moi-nhat" aria-label="News24 - Trang chủ">
+      <a class="brand" href="./" aria-label="News24 - Trang chủ">
         <span class="brand-mark">News</span><span class="brand-sub">24</span>
         <span class="brand-tagline">Đọc báo nhanh 24h</span>
       </a>
@@ -55,9 +55,9 @@
     </div>
   </nav>
 
-  <!-- Main -->
+  <!-- Main: list view + article view share the sidebar -->
   <main class="container layout">
-    <section class="main-col">
+    <section class="main-col" id="viewList">
       <div class="col-header">
         <h1 class="col-title" id="colTitle">Tin mới nhất</h1>
         <span class="col-meta" id="colMeta"></span>
@@ -76,6 +76,32 @@
       <div class="load-more-wrap">
         <button id="loadMoreBtn" class="load-more" type="button" hidden>Xem thêm tin</button>
       </div>
+    </section>
+
+    <!-- Article view: rendered for /news/<slug>.html URLs (see 404.html) -->
+    <section class="main-col" id="viewArticle" hidden>
+      <a class="back-link" href="./">← Quay lại tin tức</a>
+      <div class="col-header">
+        <h1 class="col-title" id="artCat">Bài viết</h1>
+        <span class="col-meta" id="artTime"></span>
+      </div>
+      <h1 class="art-h1" id="artTitle"></h1>
+      <p class="art-sapo" id="artSapo"></p>
+      <figure class="reader-lead" id="artLead" hidden>
+        <img id="artLeadImg" alt="Ảnh minh họa" loading="lazy" referrerpolicy="no-referrer">
+      </figure>
+      <a class="reader-full-btn" id="artFullBtn" target="_blank" rel="noopener">
+        Đọc bản đầy đủ trên VnExpress ↗</a>
+      <div class="reader-body" id="artBody"></div>
+      <div class="reader-fallback" id="artFallback" hidden>
+        <p>Không tải được toàn văn bài viết (mạng chặn hoặc máy chủ giới hạn). Bạn có thể
+          <span class="retry" id="artRetry">thử lại</span> hoặc
+          <a id="artOrigin" target="_blank" rel="noopener">đọc bản gốc trên VnExpress</a>.</p>
+      </div>
+      <footer class="reader-foot">
+        <p class="reader-source">Nội dung thuộc bản quyền VnExpress —
+          <a id="artOrigin2" target="_blank" rel="noopener">xem bản gốc</a></p>
+      </footer>
     </section>
 
     <!-- Sidebar -->
@@ -111,41 +137,6 @@
     </div>
   </template>
 
-  <!-- In-page article reader -->
-  <div class="reader-backdrop" id="readerBackdrop" hidden>
-    <article class="reader" role="dialog" aria-modal="true" aria-labelledby="readerTitle">
-      <header class="reader-head">
-        <span class="reader-cat" id="readerCat"></span>
-        <span class="reader-head-actions">
-          <a class="reader-origin" id="readerOrigin" target="_blank" rel="noopener">Bản gốc ↗</a>
-          <button class="reader-close" id="readerClose" type="button" aria-label="Đóng bài viết">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-          </button>
-        </span>
-      </header>
-      <div class="reader-scroll" id="readerScroll">
-        <h1 class="reader-title" id="readerTitle"></h1>
-        <div class="reader-meta" id="readerMeta"></div>
-        <p class="reader-sapo" id="readerSapo"></p>
-        <figure class="reader-lead" id="readerLead" hidden>
-          <img id="readerLeadImg" alt="Ảnh minh họa" loading="lazy" referrerpolicy="no-referrer">
-        </figure>
-        <a class="reader-full-btn" id="readerFullBtn" target="_blank" rel="noopener">
-          Đọc bản đầy đủ trên VnExpress ↗</a>
-        <div class="reader-body" id="readerBody"></div>
-        <div class="reader-fallback" id="readerFallback" hidden>
-          <p>Không tải được toàn văn bài viết (mạng chặn hoặc máy chủ giới hạn). Bạn có thể
-            <span class="retry" id="readerRetry">thử lại</span> hoặc
-            đọc bản gốc trên VnExpress.</p>
-        </div>
-        <footer class="reader-foot">
-          <p class="reader-source">Nội dung thuộc bản quyền VnExpress —
-            <a id="readerOrigin2" target="_blank" rel="noopener">xem bản gốc</a></p>
-        </footer>
-      </div>
-    </article>
-  </div>
-
-  <script src="js/app.js?v=5"></script>
+  <script src="js/app.js?v=6"></script>
 </body>
 </html>
