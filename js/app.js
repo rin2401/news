@@ -415,6 +415,7 @@
 
     const [first, ...rest] = items;
     const useFeatured = !state.query; // featured layout only in browse mode
+    registerItems(items);
     els.featured.innerHTML = useFeatured ? articleHtml(first, "featured") : "";
     const pageItems = useFeatured ? rest : items;
     els.list.innerHTML = pageItems
@@ -425,6 +426,7 @@
 
   function renderSidebar(items) {
     if (!items || !items.length) return;
+    registerItems(items);
     // Sidebar shows latest headlines, skipping what the main column
     // already displays for the current category.
     const seen = new Set(
@@ -657,7 +659,14 @@
   };
 
   const articleCache = new Map(); // article link -> sanitized html
-  const artState = { link: null };
+  const artState = { link: null, viaPush: false };
+
+  // Rendered cards by article link - lets card clicks transition to the
+  // article view in place (pushState) instead of a full page load.
+  const itemIndex = new Map();
+  function registerItems(items) {
+    (items || []).forEach((i) => itemIndex.set(i.link, i));
+  }
 
   // VnExpress slugs end in "-<id>.html", e.g.
   // /news/thuoc-ung-thu-qua-dat-5141250.html
@@ -898,10 +907,7 @@
     return picked.join(" ") + (len >= 380 ? "…" : "");
   }
 
-  function renderArticle(item, fckOrHtml) {
-    if (!item) {
-      item = decorate({ title: "Bài viết", link: artState.link, pubDate: Date.now() }, "");
-    }
+  function renderArticleHeader(item) {
     document.title = item.title + " - News24";
     artEls.cat.textContent = item.cat || "Tin tức";
     artEls.title.textContent = item.title;
@@ -915,7 +921,9 @@
       artEls.lead.hidden = true;
     }
     artEls.fullBtn.href = artEls.origin.href = artEls.origin2.href = item.link;
+  }
 
+  function renderArticleBody(item, fckOrHtml) {
     let html = null;
     if (typeof fckOrHtml === "string") {
       html = fckOrHtml;
@@ -925,6 +933,7 @@
     const textLen = html ? html.replace(/<[^>]*>/g, "").trim().length : 0;
     if (html && textLen >= 80) {
       articleCache.set(item.link, html);
+      saveArticleHtml(item.link, html);
       applyArticleBody(html);
       artEls.fallback.hidden = true;
       const summary = extractSummary(item);
@@ -939,9 +948,76 @@
     }
   }
 
+  function showBodyLoading() {
+    artEls.fallback.hidden = true;
+    artEls.summary.hidden = true;
+    artEls.body.innerHTML =
+      '<div class="rd-loading"><span class="rd-spinner"></span>Đang tải bài viết...</div>';
+  }
+
+  // Persist sanitized article HTML for ~24h so repeat visits skip the
+  // jina/proxy round trip even after a full page load.
+  function saveArticleHtml(link, html) {
+    try {
+      localStorage.setItem(
+        "news24:art:" + link,
+        JSON.stringify({ t: Date.now(), html })
+      );
+    } catch {
+      /* quota / private mode - ignore */
+    }
+  }
+
+  function loadSavedArticleHtml(link) {
+    try {
+      const raw = localStorage.getItem("news24:art:" + link);
+      if (!raw) return null;
+      const { t, html } = JSON.parse(raw);
+      if (!html || Date.now() - (t || 0) > 24 * 3600e3) return null;
+      return html;
+    } catch {
+      return null;
+    }
+  }
+
+  async function fetchArticleBody(item) {
+    if (articleCache.has(item.link)) return articleCache.get(item.link);
+    const saved = loadSavedArticleHtml(item.link);
+    if (saved) {
+      articleCache.set(item.link, saved);
+      return saved;
+    }
+    return sanitizeArticle(await fetchArticleHtml(item.link)); // may throw
+  }
+
+  // In-page navigation: pushState keeps the pretty /news/<slug>.html URL
+  // while rendering without a page load (and the 404-trick still serves
+  // the same page on hard load / shared links).
+  function openArticleInPlace(item, viaPop) {
+    artState.link = item.link;
+    artState.viaPush = !viaPop;
+    if (!viaPop) history.pushState({ art: item.link }, "", relativeSlug(item.link));
+    showView("article");
+    window.scrollTo(0, 0);
+    renderArticleHeader(item);
+    showBodyLoading();
+    fetchArticleBody(item)
+      .then((html) => {
+        if (artState.link !== item.link) return;
+        renderArticleBody(item, html);
+      })
+      .catch(() => {
+        if (artState.link !== item.link) return;
+        renderArticleBody(item, null);
+      });
+  }
+
+  // Direct URL entry (/news/<slug>.html served by 404.html): item data
+  // comes from the snapshots, body from cache or the proxy chain.
   async function loadArticle(slug) {
     const link = "https://vnexpress.net/" + slug + ".html";
     artState.link = link;
+    artState.viaPush = false;
     showView("article");
     window.scrollTo(0, 0);
     artEls.title.textContent = "Đang tải bài viết...";
@@ -950,36 +1026,76 @@
     artEls.sapo.textContent = "";
     artEls.lead.hidden = true;
     artEls.fullBtn.href = artEls.origin.href = artEls.origin2.href = link;
-    artEls.fallback.hidden = true;
-    artEls.body.innerHTML =
-      '<div class="rd-loading"><span class="rd-spinner"></span>Đang tải bài viết...</div>';
+    showBodyLoading();
 
-    let fck = null;
-    if (articleCache.has(link)) {
-      const item = await findItemData(slug);
-      if (artState.link !== link) return;
-      renderArticle(item, articleCache.get(link));
-      return;
-    }
+    let html = loadSavedArticleHtml(link);
+    if (html) articleCache.set(link, html);
+
     const [itemRes, fckRes] = await Promise.allSettled([
       findItemData(slug),
-      fetchArticleHtml(link),
+      html ? Promise.resolve(null) : fetchArticleHtml(link),
     ]);
     if (artState.link !== link) return; // user navigated away meanwhile
     let item = itemRes.status === "fulfilled" ? itemRes.value : null;
-    fck = fckRes.status === "fulfilled" ? fckRes.value : null;
+    const fck = fckRes.status === "fulfilled" ? fckRes.value : null;
     if (!item && fck) {
       item = itemFromArticle(fck, link);
     }
-    renderArticle(item, fck);
+    if (!item) {
+      item = decorate({ title: "Bài viết", link, pubDate: Date.now() }, "");
+    }
+    renderArticleHeader(item);
+    renderArticleBody(item, html || fck);
   }
 
-  artEls.retry.addEventListener("click", () => {
-    if (artState.link) {
-      articleCache.delete(artState.link);
-      const slug = currentSlug();
-      if (slug) loadArticle(slug);
+  // Card clicks (list + sidebar) with plain slug.html hrefs become
+  // in-page transitions; modified clicks fall through to native
+  // navigation (new tab), unknown links to the 404-trick page load.
+  document.addEventListener("click", (e) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+    const a = e.target.closest ? e.target.closest("a") : null;
+    if (!a) return;
+    const href = a.getAttribute("href") || "";
+    if (!/^[a-z0-9-]+-\d+\.html?$/i.test(href)) return;
+    const item = itemIndex.get("https://vnexpress.net/" + href);
+    if (!item) return;
+    e.preventDefault();
+    openArticleInPlace(item, false);
+  });
+
+  window.addEventListener("popstate", () => {
+    const slug = currentSlug();
+    if (slug) {
+      const link = "https://vnexpress.net/" + slug + ".html";
+      const item = itemIndex.get(link);
+      if (item) openArticleInPlace(item, true);
+      else loadArticle(slug);
+      return;
     }
+    // history returned to the list view
+    artState.link = null;
+    artState.viaPush = false;
+    showView("list");
+    document.title = "News24 - Đọc báo nhanh 24h từ VnExpress RSS";
+  });
+
+  // From an in-page article, the back link replays the history entry
+  // (no reload); on a hard-loaded article it stays a plain href="./".
+  document.querySelector(".back-link").addEventListener("click", (e) => {
+    if (artState.viaPush) {
+      e.preventDefault();
+      history.back();
+    }
+  });
+
+  artEls.retry.addEventListener("click", () => {
+    if (!artState.link) return;
+    articleCache.delete(artState.link);
+    try {
+      localStorage.removeItem("news24:art:" + artState.link);
+    } catch {}
+    const slug = currentSlug();
+    if (slug) loadArticle(slug);
   });
 
   // ------------------------------------------------------------------
