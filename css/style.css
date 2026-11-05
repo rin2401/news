@@ -820,3 +820,42 @@ body.modal-open { overflow: hidden; }
 
 /* the flex display above must not override the hidden attribute */
 .reader-backdrop[hidden] { display: none; }
+
+/* Reader lead image (from RSS enclosure) sits right under the sapo so the
+   headline and its photo are never far apart, mirroring VnExpress */
+.reader-lead { margin: 0 0 14px; }
+
+.reader-lead img {
+  width: 100%;
+  height: auto;
+  border-radius: 6px;
+  display: block;
+}
+
+.reader-lead figcaption {
+  font-size: 12px;
+  color: var(--text-2);
+  text-align: center;
+  margin-top: 6px;
+}
+
+/* Prominent, always-visible link to the full original article */
+.reader-full-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--primary);
+  border: 1.5px solid var(--primary);
+  border-radius: 999px;
+  padding: 7px 16px;
+  margin: 0 0 18px;
+  background: transparent;
+  transition: background .15s, color .15s;
+}
+
+.reader-full-btn:hover {
+  background: var(--primary);
+  color: #fff;
+}

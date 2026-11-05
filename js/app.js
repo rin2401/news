@@ -634,6 +634,9 @@
     origin2: document.getElementById("readerOrigin2"),
     close: document.getElementById("readerClose"),
     retry: document.getElementById("readerRetry"),
+    lead: document.getElementById("readerLead"),
+    leadImg: document.getElementById("readerLeadImg"),
+    fullBtn: document.getElementById("readerFullBtn"),
   };
 
   const itemIndex = new Map(); // article link -> decorated RSS item
@@ -756,6 +759,14 @@
     return out.innerHTML;
   }
 
+  function urlBasename(u) {
+    try {
+      return new URL(u).pathname.split("/").pop();
+    } catch {
+      return u || "";
+    }
+  }
+
   function openReader(item) {
     readerState.openLink = item.link;
     readerEls.cat.textContent = item.cat;
@@ -763,17 +774,42 @@
     readerEls.meta.textContent = timeAgo(item.pubDate) + " · nguồn VnExpress";
     readerEls.sapo.textContent = item.sapo || "";
     readerEls.sapo.style.display = item.sapo ? "" : "none";
+    // Lead image straight under the headline (VnExpress-style) so the
+    // title and its photo never drift apart on text-heavy articles.
+    if (item.img) {
+      readerEls.leadImg.src = item.img;
+      readerEls.lead.hidden = false;
+    } else {
+      readerEls.lead.hidden = true;
+    }
+    readerEls.fullBtn.href = item.link;
     readerEls.origin.href = readerEls.origin2.href = item.link;
     readerEls.backdrop.hidden = false;
     document.body.classList.add("modal-open");
     loadReaderBody(item);
   }
 
+  // Render fetched article HTML; drop the body's first image when it is
+  // the same photo already shown as the lead (prevents duplication).
+  function applyReaderBody(html) {
+    readerEls.body.innerHTML = html;
+    if (readerEls.lead.hidden) return;
+    const leadName = urlBasename(readerEls.leadImg.getAttribute("src"));
+    const first = readerEls.body.querySelector("img");
+    if (first && urlBasename(first.getAttribute("src")) === leadName) {
+      const fig = first.closest("figure");
+      first.remove();
+      if (fig && !fig.textContent.trim() && !fig.querySelector("img")) {
+        fig.remove();
+      }
+    }
+  }
+
   async function loadReaderBody(item) {
     if (readerState.openLink !== item.link) return;
     readerEls.fallback.hidden = true;
     if (articleCache.has(item.link)) {
-      readerEls.body.innerHTML = articleCache.get(item.link);
+      applyReaderBody(articleCache.get(item.link));
       return;
     }
     readerEls.body.innerHTML =
@@ -786,21 +822,13 @@
       }
       articleCache.set(item.link, html);
       if (readerState.openLink !== item.link) return;
-      readerEls.body.innerHTML = html;
+      applyReaderBody(html);
     } catch (e) {
       if (readerState.openLink !== item.link) return;
-      // graceful degrade: show what the RSS gave us + explanation
+      // graceful degrade: lead image + sapo are already shown above,
+      // just surface the explanation and the full-article link
       readerEls.body.innerHTML = "";
-      const box = readerEls.fallback;
-      box.querySelectorAll("img").forEach((i) => i.remove());
-      box.hidden = false;
-      if (item.img) {
-        const im = document.createElement("img");
-        im.src = item.img;
-        im.setAttribute("referrerpolicy", "no-referrer");
-        im.onerror = () => im.remove();
-        box.prepend(im);
-      }
+      readerEls.fallback.hidden = false;
     }
   }
 

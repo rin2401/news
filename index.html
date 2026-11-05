@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=3">
+  <link rel="stylesheet" href="css/style.css?v=4">
 </head>
 <body>
   <!-- Top header -->
@@ -127,6 +127,11 @@
         <h1 class="reader-title" id="readerTitle"></h1>
         <div class="reader-meta" id="readerMeta"></div>
         <p class="reader-sapo" id="readerSapo"></p>
+        <figure class="reader-lead" id="readerLead" hidden>
+          <img id="readerLeadImg" alt="Ảnh minh họa" loading="lazy" referrerpolicy="no-referrer">
+        </figure>
+        <a class="reader-full-btn" id="readerFullBtn" target="_blank" rel="noopener">
+          Đọc bản đầy đủ trên VnExpress ↗</a>
         <div class="reader-body" id="readerBody"></div>
         <div class="reader-fallback" id="readerFallback" hidden>
           <p>Không tải được toàn văn bài viết (mạng chặn hoặc máy chủ giới hạn). Bạn có thể
@@ -141,6 +146,6 @@
     </article>
   </div>
 
-  <script src="js/app.js?v=3"></script>
+  <script src="js/app.js?v=4"></script>
 </body>
 </html>
