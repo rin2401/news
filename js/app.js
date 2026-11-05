@@ -655,10 +655,11 @@
   const STRIP_SELECTOR = [
     "script", "style", "iframe", "form", "input", "button", "noscript",
     "svg", "video", "audio", "object", "embed", "source", "h1",
-    "p.description", ".title-detail", ".author", "[class*='list-news']",
-    "[class*='box-']", "[class*='tag-']", "[class*='sidebar']",
-    "[class*='banner']", "[class*='newsletter']", "[class*='subscribe']",
-    "[class*='hidden']", "[class*='ad-']", "[id*='banner']",
+    "meta", "link", "template", "p.description", ".title-detail", ".author",
+    "[class*='list-news']", "[class*='box-']", "[class*='tag-']",
+    "[class*='sidebar']", "[class*='banner']", "[class*='newsletter']",
+    "[class*='subscribe']", "[class*='hidden']", "[class*='ad-']",
+    "[id*='banner']",
   ].join(",");
 
   // Full-text fetch chain: jina (server-rendered HTML) first, then the
@@ -740,14 +741,19 @@
       }
     });
 
-    // everything else: drop attributes (styles, classes, trackers)
-    rootClone
-      .querySelectorAll(
-        "p,h2,h3,h4,figure,figcaption,table,thead,tbody,tfoot,tr,td,th,ul,ol,li,blockquote,hr,span,strong,em,b,i"
-      )
-      .forEach((el) => {
-        [...el.attributes].forEach((a) => el.removeAttribute(a.name));
-      });
+    // everything else: drop attributes on EVERY remaining element.
+    // VnExpress wraps photos in <div class="fig-picture" style=
+    // "padding-bottom:132.8%"> lazy-load hacks; keeping that style would
+    // push the figcaption hundreds of pixels below its image.
+    rootClone.querySelectorAll("*").forEach((el) => {
+      if (el.tagName === "IMG" || el.tagName === "A") return; // handled above
+      [...el.attributes].forEach((a) => el.removeAttribute(a.name));
+    });
+
+    // figures that lost their image are stray captions - drop them
+    rootClone.querySelectorAll("figure").forEach((f) => {
+      if (!f.querySelector("img")) f.remove();
+    });
 
     const out = document.createElement("div");
     [...rootClone.children].forEach((child) => {
@@ -782,6 +788,9 @@
     } else {
       readerEls.lead.hidden = true;
     }
+    readerEls.lead
+      .querySelectorAll("figcaption")
+      .forEach((c) => c.remove()); // stale credit from a previous article
     readerEls.fullBtn.href = item.link;
     readerEls.origin.href = readerEls.origin2.href = item.link;
     readerEls.backdrop.hidden = false;
@@ -789,19 +798,24 @@
     loadReaderBody(item);
   }
 
-  // Render fetched article HTML; drop the body's first image when it is
-  // the same photo already shown as the lead (prevents duplication).
+  // Render fetched article HTML; when the body's first photo is the same
+  // file as the lead image shown under the headline, remove the inline
+  // copy and move its credit under the lead.
   function applyReaderBody(html) {
     readerEls.body.innerHTML = html;
     if (readerEls.lead.hidden) return;
     const leadName = urlBasename(readerEls.leadImg.getAttribute("src"));
     const first = readerEls.body.querySelector("img");
-    if (first && urlBasename(first.getAttribute("src")) === leadName) {
-      const fig = first.closest("figure");
-      first.remove();
-      if (fig && !fig.textContent.trim() && !fig.querySelector("img")) {
-        fig.remove();
-      }
+    if (!first || urlBasename(first.getAttribute("src")) !== leadName) return;
+    const fig = first.closest("figure");
+    const cap = fig ? fig.querySelector("figcaption") : null;
+    const capText = cap ? cap.textContent.trim() : "";
+    if (fig) fig.remove();
+    else first.remove();
+    if (capText) {
+      const leadCap = document.createElement("figcaption");
+      leadCap.textContent = capText;
+      readerEls.lead.appendChild(leadCap);
     }
   }
 
