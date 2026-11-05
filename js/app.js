@@ -100,12 +100,23 @@
     return m ? safeImg(m[1]) : "";
   }
 
+  // Some proxies (rss2json) XML-escape CDATA content, turning "&" into
+  // "&amp;" inside image/query URLs. vnecdn's signed params then mismatch
+  // (HTTP 401), so decode amp entities before validating the URL.
+  function decodeAmp(u) {
+    return String(u || "")
+      .replace(/&amp;/gi, "&")
+      .replace(/&#0?38;/gi, "&");
+  }
+
   function safeUrl(u) {
-    return /^https?:\/\//i.test(u || "") ? u : "";
+    const s = decodeAmp(u);
+    return /^https?:\/\//i.test(s) ? s : "";
   }
 
   function safeImg(u) {
-    return /^https?:\/\//i.test(u || "") ? u : "";
+    const s = decodeAmp(u);
+    return /^https?:\/\//i.test(s) ? s : "";
   }
 
   function utcStringToMs(s) {
@@ -181,7 +192,8 @@
   // Fetch with proxy fallback + localStorage cache
   // ------------------------------------------------------------------
   function cacheKey(slug) {
-    return "news24:cache:" + slug;
+    // v2: items cached before the "&amp;" URL fix carried broken image links
+    return "news24:v2:cache:" + slug;
   }
 
   function readCache(slug) {
