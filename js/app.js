@@ -674,7 +674,6 @@
     sumAiBtn: document.getElementById("sumAiBtn"),
     ttsBtn: document.getElementById("ttsBtn"),
     ttsRateBtn: document.getElementById("ttsRateBtn"),
-    ttsVoiceBtn: document.getElementById("ttsVoiceBtn"),
   };
 
   const articleCache = new Map(); // article link -> sanitized html
@@ -1163,39 +1162,13 @@
   const GTTS = "https://translate.googleapis.com/translate_tts?ie=UTF-8&client=gtx&tl=vi";
   let tts = { playing: false, token: 0, audio: null };
 
-  // ---- voice picker: Google (network) vs the OS speech voice ----
-  // Google Translate TTS exposes exactly one Vietnamese voice; the local
-  // route uses the system voice (macOS "Linh", Android/Windows: any vi
-  // voice the browser reports).
-  if (window.speechSynthesis) speechSynthesis.getVoices(); // warm the async voice list
-  function viVoiceName() {
-    const v = (window.speechSynthesis ? speechSynthesis.getVoices() : [])
-      .find((x) => /^vi/i.test(x.lang || ""));
-    return v ? v.name.replace(/\s*\(.*?\)\s*/g, "").trim() : "Giọng máy";
-  }
-  function loadTtsVoice() {
-    return localStorage.getItem("news24:ttsvoice") === "local" ? "local" : "google";
-  }
-  let ttsVoice = loadTtsVoice();
-  function ttsVoiceLabel() {
-    return "🎙 " + (ttsVoice === "local" ? viVoiceName() : "Google");
-  }
-  if (artEls.ttsVoiceBtn) {
-    artEls.ttsVoiceBtn.textContent = ttsVoiceLabel();
-    // re-render once the async voice list actually arrives
-    if (window.speechSynthesis) {
-      speechSynthesis.addEventListener("voiceschanged", () => {
-        if (ttsVoice === "local") artEls.ttsVoiceBtn.textContent = ttsVoiceLabel();
-      }, { once: true });
-    }
-    artEls.ttsVoiceBtn.addEventListener("click", () => {
-      ttsVoice = ttsVoice === "google" ? "local" : "google";
-      try {
-        localStorage.setItem("news24:ttsvoice", ttsVoice);
-      } catch {}
-      artEls.ttsVoiceBtn.textContent = ttsVoiceLabel();
-    });
-  }
+  // Google Translate TTS is the only surviving free/keyless network voice
+  // for Vietnamese (StreamElements locked its TTS behind an API key, Bing
+  // tspeak is dead, Edge Read-Aloud blocks browser origins, Pollinations
+  // dropped audio from the free tier). speechSynthesis stays as the
+  // automatic fallback when Google is unreachable — warm its async voice
+  // list so the fallback picks a vi voice on the first failure.
+  if (window.speechSynthesis) speechSynthesis.getVoices();
 
   // ---- reading speed (persisted) ----
   const TTS_RATES = [0.8, 1, 1.25, 1.5];
@@ -1297,10 +1270,6 @@
     tts.playing = true;
     artEls.ttsBtn.textContent = "⏹ Dừng đọc";
     const token = ++tts.token;
-    if (ttsVoice === "local") {
-      speakLocal(text, token); // user picked the OS voice - no Google detour
-      return;
-    }
     playGoogleTts(text, token)
       .then(() => {
         if (tts.token === token) stopTts(); // finished naturally
