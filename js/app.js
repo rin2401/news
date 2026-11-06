@@ -673,6 +673,7 @@
     summaryText: document.getElementById("artSummaryText"),
     sumAiBtn: document.getElementById("sumAiBtn"),
     ttsBtn: document.getElementById("ttsBtn"),
+    ttsRateBtn: document.getElementById("ttsRateBtn"),
   };
 
   const articleCache = new Map(); // article link -> sanitized html
@@ -1161,6 +1162,27 @@
   const GTTS = "https://translate.googleapis.com/translate_tts?ie=UTF-8&client=gtx&tl=vi";
   let tts = { playing: false, token: 0, audio: null };
 
+  // ---- reading speed (persisted) ----
+  const TTS_RATES = [0.8, 1, 1.25, 1.5];
+  function loadTtsRate() {
+    const v = parseFloat(localStorage.getItem("news24:ttsrate"));
+    return TTS_RATES.includes(v) ? v : 1;
+  }
+  function ttsRateLabel() {
+    return "⚡ " + ttsRate + "×";
+  }
+  let ttsRate = loadTtsRate();
+  if (artEls.ttsRateBtn) artEls.ttsRateBtn.textContent = ttsRateLabel();
+  artEls.ttsRateBtn.addEventListener("click", () => {
+    ttsRate = TTS_RATES[(TTS_RATES.indexOf(ttsRate) + 1) % TTS_RATES.length];
+    try {
+      localStorage.setItem("news24:ttsrate", String(ttsRate));
+    } catch {}
+    artEls.ttsRateBtn.textContent = ttsRateLabel();
+    // adjust the chunk that is already playing, no restart needed
+    if (tts.audio) tts.audio.playbackRate = ttsRate;
+  });
+
   function stopTts() {
     tts.token++;
     tts.playing = false;
@@ -1204,6 +1226,8 @@
       await new Promise((resolve, reject) => {
         const a = new Audio(url);
         tts.audio = a;
+        a.defaultPlaybackRate = ttsRate; // survives the load algorithm reset
+        a.playbackRate = ttsRate; // browsers keep the voice pitch (preservesPitch)
         a.onended = resolve;
         a.onerror = () => reject(new Error("gtts chunk " + i));
         a.play().catch(() => reject(new Error("gtts play " + i)));
@@ -1219,6 +1243,7 @@
     artEls.ttsBtn.textContent = "⏹ Dừng đọc (giọng máy)";
     const u = new SpeechSynthesisUtterance(text);
     u.lang = "vi-VN";
+    u.rate = ttsRate;
     const v = speechSynthesis.getVoices().find((x) => /^vi/i.test(x.lang || ""));
     if (v) u.voice = v;
     u.onend = done;
