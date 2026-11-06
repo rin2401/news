@@ -6,11 +6,14 @@
   <title>News24 - Đọc báo nhanh 24h từ VnExpress RSS</title>
   <meta name="description" content="Trang đọc báo tổng hợp nhanh 24h, lấy tin trực tiếp từ RSS VnExpress: thời sự, thế giới, kinh doanh, thể thao, công nghệ, giải trí...">
   <meta name="theme-color" content="#ed1c24">
+  <!-- Google Translate TTS (read-aloud) 404s any request carrying a
+       Referer; audio playback needs this page-wide suppression -->
+  <meta name="referrer" content="no-referrer">
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=13">
+  <link rel="stylesheet" href="css/style.css?v=14">
 </head>
 <body>
   <!-- Top header -->
@@ -92,7 +95,10 @@
       </figure>
       <div class="art-summary" id="artSummary" hidden>
         <div class="art-summary-label"><span>📄 Tóm tắt</span>
-          <button class="sum-ai-btn" id="sumAiBtn" type="button">✨ Tóm tắt bằng AI</button>
+          <div class="sum-actions">
+            <button class="sum-ai-btn" id="ttsBtn" type="button">🔊 Đọc tóm tắt</button>
+            <button class="sum-ai-btn" id="sumAiBtn" type="button">✨ Tóm tắt bằng AI</button>
+          </div>
         </div>
         <p id="artSummaryText"></p>
       </div>
@@ -146,6 +152,6 @@
     </div>
   </template>
 
-  <script src="js/app.js?v=13"></script>
+  <script src="js/app.js?v=14"></script>
 </body>
 </html>

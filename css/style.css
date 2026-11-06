@@ -919,12 +919,21 @@ body.modal-open { overflow: hidden; }
   color: var(--text);
 }
 
-/* AI summary toggle inside the summary box */
+/* AI summary toggle + read-aloud buttons inside the summary box */
 .art-summary-label {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* two pill buttons side by side, wrap on narrow screens */
+.sum-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .sum-ai-btn {

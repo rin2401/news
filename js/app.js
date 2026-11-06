@@ -672,6 +672,7 @@
     summary: document.getElementById("artSummary"),
     summaryText: document.getElementById("artSummaryText"),
     sumAiBtn: document.getElementById("sumAiBtn"),
+    ttsBtn: document.getElementById("ttsBtn"),
   };
 
   const articleCache = new Map(); // article link -> sanitized html
@@ -1108,6 +1109,7 @@
   });
 
   function showBodyLoading() {
+    stopTts(); // reading a summary of the previous article makes no sense
     artEls.fallback.hidden = true;
     artEls.summary.hidden = true;
     artEls.body.innerHTML =
@@ -1148,6 +1150,102 @@
     }
     return sanitizeArticle(await fetchArticleHtml(item.link)); // may throw
   }
+
+  // ---- Read the summary aloud (TTS) ----
+  // Primary voice: Google Translate TTS played through <audio> elements.
+  // Playback is NOT CORS-checked (only fetch would be), but Google 404s any
+  // request carrying a Referer — the page-wide <meta referrer no-referrer>
+  // in index.html suppresses it. ~200-char requests, so pack sentences.
+  // Fallback: the browser's built-in speechSynthesis (decent on Android /
+  // Windows with a vi voice; rough on macOS which ships none).
+  const GTTS = "https://translate.googleapis.com/translate_tts?ie=UTF-8&client=gtx&tl=vi";
+  let tts = { playing: false, token: 0, audio: null };
+
+  function stopTts() {
+    tts.token++;
+    tts.playing = false;
+    if (tts.audio) {
+      const a = tts.audio;
+      tts.audio = null;
+      a.onended = a.onerror = null;
+      a.pause();
+      a.removeAttribute("src"); // also aborts an in-flight load
+    }
+    if (window.speechSynthesis) speechSynthesis.cancel();
+    if (artEls.ttsBtn) artEls.ttsBtn.textContent = "🔊 Đọc tóm tắt";
+  }
+
+  function ttsChunks(text) {
+    const sentences = text.split(/(?<=[.!?…])\s+/).filter(Boolean);
+    const chunks = [];
+    let cur = "";
+    for (const s of sentences) {
+      if (cur && (cur + " " + s).length > 180) {
+        chunks.push(cur);
+        cur = s.slice(0, 180); // single over-long sentence: hard cap
+      } else {
+        cur = cur ? cur + " " + s : s;
+      }
+    }
+    if (cur) chunks.push(cur);
+    return chunks;
+  }
+
+  async function playGoogleTts(text, token) {
+    const chunks = ttsChunks(text);
+    for (let i = 0; i < chunks.length; i++) {
+      if (tts.token !== token) return; // stopped mid-way
+      const url =
+        GTTS +
+        "&total=" + chunks.length +
+        "&idx=" + i +
+        "&textlen=" + chunks[i].length +
+        "&q=" + encodeURIComponent(chunks[i]);
+      await new Promise((resolve, reject) => {
+        const a = new Audio(url);
+        tts.audio = a;
+        a.onended = resolve;
+        a.onerror = () => reject(new Error("gtts chunk " + i));
+        a.play().catch(() => reject(new Error("gtts play " + i)));
+      });
+    }
+  }
+
+  function speakLocal(text, token) {
+    const done = () => {
+      if (tts.token === token) stopTts();
+    };
+    if (!window.speechSynthesis) return done();
+    artEls.ttsBtn.textContent = "⏹ Dừng đọc (giọng máy)";
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "vi-VN";
+    const v = speechSynthesis.getVoices().find((x) => /^vi/i.test(x.lang || ""));
+    if (v) u.voice = v;
+    u.onend = done;
+    u.onerror = done;
+    speechSynthesis.cancel();
+    speechSynthesis.speak(u);
+  }
+
+  artEls.ttsBtn.addEventListener("click", () => {
+    if (tts.playing) {
+      stopTts();
+      return;
+    }
+    const text = (artEls.summaryText.textContent || "").trim();
+    if (!text) return;
+    tts.playing = true;
+    artEls.ttsBtn.textContent = "⏹ Dừng đọc";
+    const token = ++tts.token;
+    playGoogleTts(text, token)
+      .then(() => {
+        if (tts.token === token) stopTts(); // finished naturally
+      })
+      .catch(() => {
+        if (tts.token !== token) return; // user already stopped
+        speakLocal(text, token); // Google failed → built-in voice
+      });
+  });
 
   // In-page navigation: pushState keeps the pretty /news/<slug>.html URL
   // while rendering without a page load (and the 404-trick still serves
