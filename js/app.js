@@ -1205,20 +1205,28 @@
     if (artEls.ttsBtn) artEls.ttsBtn.textContent = "🔊 Đọc tóm tắt";
   }
 
+  // Split the summary into Google Translate TTS requests of <= TTS_MAX
+  // chars (the endpoint answers HTTP 400 past ~200). One forward scan,
+  // cutting at the last space that fits. The previous version did
+  // `cur = s.slice(0, 180)`, which silently DROPPED everything after char
+  // 180 of any sentence longer than one request, so long summaries lost
+  // their tail. Invariant: ttsChunks(t).join(" ") === t (whitespace-normalised).
+  const TTS_MAX = 190;
   function ttsChunks(text) {
-    const sentences = text.split(/(?<=[.!?…])\s+/).filter(Boolean);
-    const chunks = [];
-    let cur = "";
-    for (const s of sentences) {
-      if (cur && (cur + " " + s).length > 180) {
-        chunks.push(cur);
-        cur = s.slice(0, 180); // single over-long sentence: hard cap
-      } else {
-        cur = cur ? cur + " " + s : s;
+    const clean = String(text || "").replace(/\s+/g, " ").trim();
+    if (!clean) return [];
+    const out = [];
+    let at = 0;
+    while (at < clean.length) {
+      let end = Math.min(at + TTS_MAX, clean.length);
+      if (end < clean.length) {
+        const sp = clean.lastIndexOf(" ", end);
+        if (sp > at) end = sp; // cut at a word boundary (else: giant word)
       }
+      out.push(clean.slice(at, end).trim()); // glue char dropped...
+      at = end + 1; // ...consumed here (join(" ") rebuilds `clean`)
     }
-    if (cur) chunks.push(cur);
-    return chunks;
+    return out;
   }
 
   async function playGoogleTts(text, token) {
