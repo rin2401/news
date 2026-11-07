@@ -436,6 +436,9 @@
       state.items.slice(0, state.shown + 1).map((i) => i.link)
     );
     const pool = items.filter((i) => !seen.has(i.link)).slice(0, 12);
+    els.sideList.innerHTML = pool
+      .map((it) => articleHtml(decorate(it, SIDEBAR_FEED), "side"))
+      .join("");
     els.sideList.insertAdjacentHTML(
       "beforeend",
       '<button class="side-more" type="button" aria-expanded="false">' +
@@ -1027,7 +1030,16 @@
     }
   }
 
-  // ---- AI summary (Pollinations, free & key-less, CORS-enabled) ----
+  // ---- AI summary ----
+  // Two free, key-less, CORS-enabled providers, tried in order:
+  //   1. OVH "Kepler" public OpenAI-compatible endpoint - Mistral Small 24B
+  //      answers in ~3.3s (fastest of the six models measured; the Qwen and
+  //      gpt-oss-* ones burn their whole budget on hidden reasoning and
+  //      returned an empty `content`). Limit: 2 requests/minute per IP.
+  //   2. Pollinations - GPT-OSS 20B, ~8-17s and only 1 reply every 45s,
+  //      kept as the fallback because it is a different network entirely.
+  // Both expose their limits in headers, so the governor below paces itself
+  // instead of hammering them until they answer 429/402.
   const AI_TTL = 7 * 24 * 3600e3; // summaries rarely go stale - cache a week
 
   function loadAiSummary(link) {
@@ -1051,34 +1063,143 @@
     } catch {}
   }
 
-  async function aiSummarize(link) {
+  // One prompt, shared by every provider, so switching provider cannot
+  // silently change the output style.
+  const AI_PROMPT =
+    "Bạn là trợ lý tóm tắt tin tức. Tóm tắt bài báo thành 3-4 câu " +
+    "ngắn gọn, chắt lọc ý chính, bằng tiếng Việt. Chỉ trả về nội " +
+    "dung tóm tắt, không mở đầu, không liệt kê.";
+
+  // Each provider: url, requests-per-minute cap, and buildBody/parse.
+  // `parse` returns the summary string (possibly empty), so the chain can
+  // move on to the next provider when one yields nothing usable.
+  const AI_PROVIDERS = [
+    {
+      name: "ovh-mistral",
+      url: "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions",
+      perMinute: 2,
+      buildBody: (content) =>
+        JSON.stringify({
+          model: "Mistral-Small-3.2-24B-Instruct-2506",
+          max_tokens: 400, // 3-4 Vietnamese sentences run ~120 tokens
+          temperature: 0.3,
+          messages: [
+            { role: "system", content: AI_PROMPT },
+            { role: "user", content },
+          ],
+        }),
+      parse: async (res) => {
+        const json = await res.json();
+        return json?.choices?.[0]?.message?.content || "";
+      },
+    },
+    {
+      name: "pollinations",
+      url: "https://text.pollinations.ai/",
+      perMinute: 1,
+      buildBody: (content) =>
+        JSON.stringify({
+          model: "openai-fast",
+          messages: [
+            { role: "system", content: AI_PROMPT },
+            { role: "user", content },
+          ],
+        }),
+      parse: async (res) => await res.text(),
+    },
+  ];
+
+  // ---- rate-limit governor ----
+  // Tracks one timestamp queue per provider and refuses to send a request
+  // that would exceed its per-minute cap; the caller is told how long to
+  // wait. Retry-After / ratelimit-reset headers are folded back in so the
+  // server's own pacing wins over our estimate.
+  const aiGate = new Map(); // provider name -> { sent: [ms], blockedUntil: ms }
+
+  function gateOf(name) {
+    let g = aiGate.get(name);
+    if (!g) aiGate.set(name, (g = { sent: [], blockedUntil: 0 }));
+    return g;
+  }
+
+  // Milliseconds to wait before `provider` may be called (0 = go now).
+  function gateWait(provider) {
+    const g = gateOf(provider.name);
+    const now = Date.now();
+    let wait = Math.max(0, g.blockedUntil - now);
+    g.sent = g.sent.filter((t) => now - t < 60000);
+    if (g.sent.length >= provider.perMinute) {
+      // oldest request in the window frees a slot 60s after it was sent
+      const freesAt = g.sent[0] + 60000;
+      wait = Math.max(wait, freesAt - now);
+    }
+    return wait;
+  }
+
+  function gateRecord(provider, res) {
+    const g = gateOf(provider.name);
+    g.sent.push(Date.now());
+    const retryAfter = parseFloat(res.headers.get("retry-after"));
+    const reset = parseFloat(
+      res.headers.get("ratelimit-reset") || res.headers.get("x-ratelimit-reset")
+    );
+    const secs = Number.isFinite(retryAfter)
+      ? retryAfter
+      : Number.isFinite(reset)
+      ? reset
+      : 0;
+    if (secs > 0) g.blockedUntil = Math.max(g.blockedUntil, Date.now() + secs * 1000);
+  }
+
+  // Sends one summarization request, respecting the governor. Resolves to
+  // { text } on success, or { error } describing why this provider failed.
+  async function aiRequest(provider, content) {
+    if (gateWait(provider) > 0) {
+      return { error: "rate" }; // skip it - the next provider may be free
+    }
+    let res;
+    try {
+      res = await fetchWithTimeout(
+        provider.url,
+        60000,
+        { "Content-Type": "application/json" },
+        { method: "POST", body: provider.buildBody(content) }
+      );
+    } catch (e) {
+      return { error: "network" };
+    }
+    gateRecord(provider, res);
+    if (!res.ok) {
+      // 429/402 = over quota, anything else 5xx = provider trouble
+      return { error: "HTTP " + res.status };
+    }
+    let text = "";
+    try {
+      text = (await provider.parse(res)) || "";
+    } catch {
+      return { error: "bad payload" };
+    }
+    text = text.trim();
+    if (!text || text.length < 20 || text.length > 1500) {
+      return { error: "bad payload" };
+    }
+    return { text };
+  }
+
+  // Tries each provider in order; the first real summary wins. A provider
+  // that is rate-limited, down or returns junk just hands over to the next.
+  async function aiSummarize() {
     const body = (artEls.body.innerText || "").replace(/\s+/g, " ").trim();
     if (body.length < 200) throw new Error("no body");
     const content = body.slice(0, 6000);
-    const res = await fetchWithTimeout("https://text.pollinations.ai/", 60000, {
-      "Content-Type": "application/json",
-    }, {
-      method: "POST",
-      body: JSON.stringify({
-        model: "openai",
-        messages: [
-          {
-            role: "system",
-            content:
-              "Bạn là trợ lý tóm tắt tin tức. Tóm tắt bài báo thành 3-4 câu " +
-              "ngắn gọn, chắt lọc ý chính, bằng tiếng Việt. Chỉ trả về nội " +
-              "dung tóm tắt, không mở đầu, không liệt kê.",
-          },
-          { role: "user", content: content },
-        ],
-      }),
-    });
-    if (!res.ok) throw new Error("AI HTTP " + res.status);
-    const text = (await res.text()).trim();
-    if (!text || text.length < 20 || text.length > 1500) {
-      throw new Error("AI bad payload");
+    let lastErr = "no provider";
+    for (const provider of AI_PROVIDERS) {
+      const out = await aiRequest(provider, content);
+      if (out.text) return out.text;
+      lastErr = out.error;
+      if (out.error === "rate") continue; // try the next provider right away
     }
-    return text;
+    throw new Error("AI " + lastErr);
   }
 
   // Background AI summary run (auto-triggered on render when not cached).
@@ -1089,7 +1210,7 @@
     if (aiInFlight === link) return;
     aiInFlight = link;
     try {
-      const text = await aiSummarize(link);
+      const text = await aiSummarize();
       saveAiSummary(link, text); // cache even if the user navigated away
       if (artState.link === link) {
         artEls.summaryText.textContent = text;
@@ -1097,8 +1218,8 @@
       }
     } catch (e) {
       if (artState.link === link) {
-        // keep the instant extractive summary on screen (rate limits:
-        // Pollinations free tier allows ~1 reply per 45s per IP)
+        // keep the instant extractive summary on screen; both free
+        // providers are IP-rate-limited, so offer a manual retry
         artEls.sumAiBtn.textContent = "✨ Thử lại AI";
       }
     } finally {

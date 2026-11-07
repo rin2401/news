@@ -12,14 +12,42 @@ browser.
 - 11 categories: Tin mới nhất, Thời sự, Thế giới, Kinh doanh,
   Bất động sản, Thể thao, Giải trí, Sức khỏe, Giáo dục, Du lịch, Pháp luật
 - VnExpress-style layout: featured story, thumbnail list, sidebar headlines
+- **Mobile-first ordering**: on phones and tablets the *Tin được quan tâm*
+  block sits at the very top of the page, right under the category tabs (its
+  first 3 headlines, then "Xem thêm tin quan tâm"); the section itself follows
 - **In-page reader**: click an article to read it right on the page — full
   text is fetched via [r.jina.ai](https://r.jina.ai) (HTML mode) with the RSS
   proxies as fallback, sanitized to a tag whitelist (scripts/styles/trackers
   stripped, lazy images resolved from `data-src`) and cached in memory
 - Live search, "load more" paging, relative timestamps ("2 giờ trước")
+- **Summary box** under each article: an offline extractive summary paints
+  instantly, then an AI summary swaps in when it arrives (cached 7 days)
+- **Read the summary aloud** via Google Translate TTS, with a reading-speed
+  toggle (0.8/1/1.25/1.5×)
 - Dark mode toggle (persisted; respects `prefers-color-scheme`)
 - 10-minute `localStorage` cache for instant navigation + offline fallback
 - No build step, no dependencies — plain HTML/CSS/JS
+
+## AI summary
+
+Two free, key-less, CORS-enabled providers are used, in order:
+
+| # | Provider | Model | Latency | Detail |
+|---|---|---|---|---|
+| 1 | [OVH Kepler](https://oai.endpoints.kepler.ai.cloud.ovh.net/v1) | `Mistral-Small-3.2-24B-Instruct-2506` | ~3.3 s | OpenAI-compatible; 2 req/min per IP |
+| 2 | [Pollinations](https://text.pollinations.ai/) | `openai-fast` (GPT-OSS 20B) | ~8–17 s | 1 reply / 45 s per IP |
+
+Mistral Small is first because it was the fastest of the six models
+benchmarked and returns clean Vietnamese prose. The Qwen and `gpt-oss-*`
+models on the same endpoint spend their whole token budget on hidden
+reasoning and came back with an empty `content`, so they are not used.
+
+A small client-side **rate-limit governor** paces requests: it keeps a
+per-provider sliding one-minute window, folds `Retry-After` /
+`ratelimit-reset` headers back into its own backoff, and skips a provider
+that would exceed its cap rather than sending a request that is going to be
+rejected. If both providers are unavailable the instant extractive summary
+stays on screen and the button offers a retry.
 
 ## How it works
 
