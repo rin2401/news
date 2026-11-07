@@ -436,9 +436,17 @@
       state.items.slice(0, state.shown + 1).map((i) => i.link)
     );
     const pool = items.filter((i) => !seen.has(i.link)).slice(0, 12);
-    els.sideList.innerHTML = pool
-      .map((it) => articleHtml(decorate(it, SIDEBAR_FEED), "side"))
-      .join("");
+    els.sideList.insertAdjacentHTML(
+      "beforeend",
+      '<button class="side-more" type="button" aria-expanded="false">' +
+        "Xem thêm tin quan tâm</button>"
+    );
+    els.sideList.classList.remove("expanded");
+    const more = els.sideList.querySelector(".side-more");
+    more.addEventListener("click", () => {
+      els.sideList.classList.add("expanded");
+      more.remove();
+    });
   }
 
   // ------------------------------------------------------------------
@@ -544,9 +552,11 @@
 
   // Category URLs are real paths (/news/<slug>, VnExpress-style) served
   // through the 404-trick; legacy #/<slug> hash links migrate to them.
+  // Resolves the base the page was served from, so the site also works
+  // under a sub-path (/news/thoi-su -> "/news/", /thoi-su -> "/").
   function currentCat() {
-    const m = /^(?:\/news)?\/([a-z-]+)\/?$/i.exec(decodeURI(location.pathname));
-    return m && CATEGORIES[m[1]] ? m[1] : null;
+    const m = /^(.*\/)([a-z-]+)\/?$/i.exec(decodeURI(location.pathname));
+    return m && CATEGORIES[m[2]] ? m[2] : null;
   }
 
   function updateHash(slug) {
@@ -701,9 +711,22 @@
     return m ? m[1] : link || "#";
   }
 
+  // "Về trang này" is a desktop sidebar card: on phones the sidebar is
+  // pinned above the article, where the reader has priority over meta copy,
+  // so JS hides it below 1024px (the markup ships it visible, so it still
+  // shows up if this script never runs). CSS also drops it below 640px.
+  const wideLayout = window.matchMedia("(min-width: 1024px)");
+  const aboutBox = document.querySelector(".side-about");
+  function syncAboutBox() {
+    if (aboutBox) aboutBox.hidden = !wideLayout.matches;
+  }
+  syncAboutBox();
+  wideLayout.addEventListener("change", syncAboutBox);
+
   function showView(name) {
     artEls.listView.hidden = name !== "list";
     artEls.view.hidden = name !== "article";
+    syncAboutBox();
   }
 
   const ALLOWED_TOP = new Set([

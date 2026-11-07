@@ -176,6 +176,97 @@ a:hover { color: var(--link-hover); }
 [data-theme="dark"] .icon-sun { display: block; }
 [data-theme="dark"] .icon-moon { display: none; }
 
+/* Portrait phones: the brand, an inline search field, the today label and
+   the theme button cannot share one 320px row - the search used to spill
+   past the viewport. Let the tool group wrap under the logo instead, and
+   give every control a 42px+ touch target (search, theme, every section). */
+@media (max-width: 639px) {
+  .header-inner {
+    flex-wrap: wrap;
+    gap: 10px 12px;
+    padding-top: 11px;
+    padding-bottom: 11px;
+  }
+
+  .brand-tagline { display: none; }
+
+  .brand-mark,
+  .brand-sub { font-size: 28px; }
+
+  .header-tools {
+    order: 2;
+    flex: 1 1 100%;
+    margin-left: 0;
+    gap: 10px;
+  }
+
+  .today { display: none; }
+
+  .search-box {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 42px;
+    padding-right: 10px;
+  }
+
+  .search-box input {
+    /* 16px stops iOS Safari from zooming the page on focus */
+    font-size: 16px;
+    padding: 9px 6px 9px 4px;
+  }
+
+  .icon-search {
+    width: 19px;
+    height: 19px;
+    margin-left: 12px;
+  }
+
+  .theme-toggle {
+    width: 42px;
+    height: 42px;
+  }
+
+  .theme-toggle svg { width: 19px; height: 19px; }
+}
+
+/* Swipeable cat-nav: the scroll padding keeps the first and the last tab
+   clear of the rounded edges, and .refresh-btn must scroll with the tabs
+   (margin-left:auto here used to push the link row 96px past the viewport).
+   A thin red underline traces how much of the tab strip is left. */
+@media (max-width: 639px) {
+  .nav-scroll {
+    gap: 0;
+    scroll-padding-inline: 4px;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(237, 28, 36, .35) transparent;
+    overscroll-behavior-x: contain;
+  }
+
+  .nav-scroll::-webkit-scrollbar {
+    display: block;
+    height: 2px;
+  }
+
+  .nav-scroll::-webkit-scrollbar-thumb {
+    background: rgba(237, 28, 36, .35);
+    border-radius: 2px;
+  }
+
+  .nav-link {
+    scroll-snap-align: start;
+    padding: 13px 12px;
+    min-height: 46px;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .refresh-btn {
+    margin-left: 6px;
+    scroll-snap-align: end;
+  }
+}
+
 /* ============ Category nav ============ */
 .cat-nav {
   background: var(--surface);
@@ -482,18 +573,30 @@ a:hover { color: var(--link-hover); }
 }
 
 /* ============ Sidebar ============ */
-.sidebar { display: flex; flex-direction: column; gap: 22px; }
-
-@media (max-width: 1023px) {
-  .sidebar { order: -1; }
+/* The sidebar is a grid, not a flex column: the "Tin được quan tâm" heading
+   is a row of its own while the list stays its own item. Below 1024px the
+   sidebar is re-ordered into the main column so the list lands directly
+   under the section tab strip - the block every reader sees first. */
+.sidebar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 16px;
 }
 
+/* Standalone boxes (the about card on desktop) */
 .side-box {
   background: var(--surface);
   border-radius: 8px;
   padding: 16px 18px;
   box-shadow: var(--shadow);
 }
+
+.side-box[hidden] { display: none; }
+
+/* "Xem thêm tin quan tâm" only exists for the phone cut-off (<=639px), where
+   the list head shows the first 3 headlines; the phone block reveals it. */
+.side-list .side-more { display: none; }
 
 .side-title {
   margin: 0 0 10px;
@@ -514,10 +617,25 @@ a:hover { color: var(--link-hover); }
   margin-right: 8px;
 }
 
+/* The heading keeps its card look on its own row: rounded top only, so it
+   still reads as the top of one card once the list is stacked under it. */
+.side-box--head {
+  padding: 12px 15px 0;
+  border-radius: 8px 8px 0 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .06);
+}
+
+.side-box--head .side-title {
+  padding-bottom: 10px;
+  margin-bottom: 0;
+  border-bottom: 1px solid var(--border);
+}
+
 .side-item {
   display: flex;
-  gap: 10px;
-  padding: 11px 0;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px 0;
   border-bottom: 1px dashed var(--border);
 }
 
@@ -549,6 +667,67 @@ a:hover { color: var(--link-hover); }
 
 .side-about p { font-size: 13px; color: var(--text-2); margin: 0; }
 .side-about a { color: var(--primary); font-weight: 600; }
+
+/* ============ Phones / portrait tablets (<=1023px) ============ */
+/* Layout: top header, sticky tab strip, then "Tin được quan tâm" right under
+   it, then the section itself (title, featured story, article rows). The
+   list used to sit *below* the whole sidebar - i.e. after the 12-headline
+   card plus the about card - pushing the first headline ~1300px down. */
+@media (max-width: 1023px) {
+  .layout {
+    padding-top: 12px;
+    gap: 14px;
+  }
+
+  .sidebar { order: -1.5; }
+  .side-box--head { order: 1; }
+  .side-list {
+    order: 2;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    background: var(--surface);
+    border-radius: 0 0 8px 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .06);
+    padding: 2px 15px 6px;
+    margin-bottom: 4px;
+  }
+  /* JS hides the about card below 1024px; this keeps it hidden (and out of
+     the flow) even if the script never runs. */
+  .side-about { order: 3; display: none; }
+  .main-col { order: 1; }
+}
+
+/* Phones: three headlines up front, then "Xem thêm tin quan tâm". The rest
+   are revealed on demand so the section's own title and lead story still
+   arrive within the first couple of swipes. */
+@media (max-width: 639px) {
+  .side-list .side-item:nth-child(n + 4) { display: none; }
+  .side-list.expanded .side-item:nth-child(n + 4) { display: flex; }
+
+  .side-list .side-more {
+    display: block;
+    width: 100%;
+    margin: 4px 0 6px;
+    min-height: 42px;
+    padding: 10px 12px;
+    font-family: var(--font-ui);
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: .3px;
+    text-transform: uppercase;
+    color: var(--primary);
+    background: transparent;
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  .side-item .a-title { font-size: 14.5px; line-height: 1.38; }
+  .side-item .a-meta { font-size: 11.5px; }
+  .side-thumb { flex-basis: 84px; border-radius: 5px; }
+}
 
 /* ============ Skeletons ============ */
 .skeleton-row {
@@ -955,3 +1134,40 @@ body.modal-open { overflow: hidden; }
 .sum-ai-btn:disabled { opacity: .65; cursor: wait; }
 
 .sum-ai-btn.busy svg { width: 10px; height: 10px; }
+
+/* ============ Touch / phone refinements (<=639px) ============ */
+@media (max-width: 639px) {
+  /* Full-bleed cards read better than 16px-guttered ones on a phone */
+  .container { padding: 0 13px; }
+
+  .layout { padding-bottom: 28px; }
+
+  /* Featured story: a little less chrome above the lead headline */
+  .article-featured { padding-top: 12px; }
+  .article-featured .a-title { font-size: 19px; margin-top: 10px; }
+
+  /* Article rows: bigger thumbnail, tighter title, no sapo (tap to read) */
+  .news-item { gap: 11px; padding: 13px 0; }
+  .thumb { flex-basis: 112px; }
+  .news-body .a-title { font-size: 15px; line-height: 1.36; }
+  .news-body .a-sapo { display: none; }
+  .a-meta { font-size: 11.5px; }
+
+  /* Rows are the main tap surface: never shorter than 44px */
+  .news-item, .side-item { min-height: 52px; }
+
+  .status-bar { margin-top: 10px; padding: 9px 12px; font-size: 12.5px; }
+
+  .col-title { font-size: 20px; }
+
+  /* Article page + summary box: thumb-sized controls, full-width CTA */
+  .reader-head { padding: 8px 12px 8px 16px; }
+  .reader-close { width: 42px; height: 42px; }
+  .reader-close svg { width: 20px; height: 20px; }
+  .reader-origin { font-size: 12px; }
+  .sum-ai-btn { min-height: 34px; padding: 6px 14px; font-size: 11.5px; }
+  .art-summary-label { row-gap: 8px; }
+  .reader-full-btn { display: inline-flex; width: 100%; justify-content: center; }
+
+  .back-link { min-height: 44px; display: inline-flex; align-items: center; }
+}
