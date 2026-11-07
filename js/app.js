@@ -1153,22 +1153,14 @@
   }
 
   // ---- Read the summary aloud (TTS) ----
-  // Primary voice: Google Translate TTS played through <audio> elements.
-  // Playback is NOT CORS-checked (only fetch would be), but Google 404s any
-  // request carrying a Referer — the page-wide <meta referrer no-referrer>
-  // in index.html suppresses it. ~200-char requests, so pack sentences.
-  // Fallback: the browser's built-in speechSynthesis (decent on Android /
-  // Windows with a vi voice; rough on macOS which ships none).
+  // Google Translate TTS is the ONLY voice — one implementation, no
+  // browser/OS voice fallback. Playback goes through <audio> elements so it
+  // covers Android, iOS and desktop alike. Playback is NOT CORS-checked
+  // (only fetch would be), but Google 404s any request carrying a Referer —
+  // the page-wide <meta referrer no-referrer> in index.html suppresses it.
+  // Requests must stay under ~200 chars, so the summary is split (ttsChunks).
   const GTTS = "https://translate.googleapis.com/translate_tts?ie=UTF-8&client=gtx&tl=vi";
   let tts = { playing: false, token: 0, audio: null };
-
-  // Google Translate TTS is the only surviving free/keyless network voice
-  // for Vietnamese (StreamElements locked its TTS behind an API key, Bing
-  // tspeak is dead, Edge Read-Aloud blocks browser origins, Pollinations
-  // dropped audio from the free tier). speechSynthesis stays as the
-  // automatic fallback when Google is unreachable — warm its async voice
-  // list so the fallback picks a vi voice on the first failure.
-  if (window.speechSynthesis) speechSynthesis.getVoices();
 
   // ---- reading speed (persisted) ----
   const TTS_RATES = [0.8, 1, 1.25, 1.5];
@@ -1201,7 +1193,6 @@
       a.pause();
       a.removeAttribute("src"); // also aborts an in-flight load
     }
-    if (window.speechSynthesis) speechSynthesis.cancel();
     if (artEls.ttsBtn) artEls.ttsBtn.textContent = "🔊 Đọc tóm tắt";
   }
 
@@ -1251,23 +1242,6 @@
     }
   }
 
-  function speakLocal(text, token) {
-    const done = () => {
-      if (tts.token === token) stopTts();
-    };
-    if (!window.speechSynthesis) return done();
-    artEls.ttsBtn.textContent = "⏹ Dừng đọc (giọng máy)";
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = "vi-VN";
-    u.rate = ttsRate;
-    const v = speechSynthesis.getVoices().find((x) => /^vi/i.test(x.lang || ""));
-    if (v) u.voice = v;
-    u.onend = done;
-    u.onerror = done;
-    speechSynthesis.cancel();
-    speechSynthesis.speak(u);
-  }
-
   artEls.ttsBtn.addEventListener("click", () => {
     if (tts.playing) {
       stopTts();
@@ -1282,9 +1256,14 @@
       .then(() => {
         if (tts.token === token) stopTts(); // finished naturally
       })
-      .catch(() => {
+      .catch((err) => {
         if (tts.token !== token) return; // user already stopped
-        speakLocal(text, token); // Google failed → built-in voice
+        stopTts(); // no second voice: tell the user instead of switching
+        console.warn("[tts] Google Translate TTS lỗi:", err && err.message);
+        artEls.ttsBtn.textContent = "⚠️ Không đọc được";
+        setTimeout(() => {
+          if (!tts.playing) artEls.ttsBtn.textContent = "🔊 Đọc tóm tắt";
+        }, 2000);
       });
   });
 
