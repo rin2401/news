@@ -1171,3 +1171,187 @@ body.modal-open { overflow: hidden; }
 
   .back-link { min-height: 44px; display: inline-flex; align-items: center; }
 }
+
+/* ============ AI settings dialog (BYOK) ============ */
+.ai-cfg {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 0;
+  width: min(520px, calc(100vw - 32px));
+  max-height: min(86vh, 760px);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 12px 44px rgba(0, 0, 0, .22);
+  font-family: var(--font-ui);
+  overflow: hidden;
+}
+
+.ai-cfg::backdrop {
+  background: rgba(0, 0, 0, .45);
+  backdrop-filter: blur(2px);
+}
+
+.ai-cfg-form {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 0 20px 18px;
+  max-height: min(86vh, 760px);
+  overflow-y: auto;
+}
+
+/* Sticky header so the close button stays reachable while scrolling */
+.ai-cfg-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 -20px 6px;
+  padding: 16px 20px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.ai-cfg-head h2 {
+  margin: 0;
+  font-family: var(--font-title);
+  font-size: 17px;
+  font-weight: 900;
+}
+
+.ai-cfg-x {
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 16px;
+  line-height: 1;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.ai-cfg-x:hover { background: var(--bg); color: var(--primary); }
+
+.ai-cfg-label {
+  font-size: 11.5px;
+  font-weight: 900;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  color: var(--text-2);
+  margin-top: 10px;
+}
+
+.ai-cfg-input {
+  font-family: var(--font-ui);
+  font-size: 14px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 11px;
+  width: 100%;
+}
+
+.ai-cfg-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(237, 28, 36, .13);
+}
+
+.ai-cfg-textarea {
+  resize: vertical;
+  min-height: 84px;
+  line-height: 1.5;
+}
+
+.ai-cfg-hint {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.ai-cfg-hint code {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 3px;
+  font-size: 11px;
+}
+
+.ai-cfg-hint.ai-cfg-warn { color: #b26a00; }
+
+[data-theme="dark"] .ai-cfg-hint.ai-cfg-warn { color: #e0a33a; }
+
+.ai-cfg-key-row { display: flex; gap: 6px; }
+
+.ai-cfg-reveal {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: 8px;
+  width: 40px;
+  flex-shrink: 0;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.ai-cfg-reveal:hover { border-color: var(--primary); }
+
+.ai-cfg-row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.ai-cfg-status {
+  margin: 12px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  padding: 8px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.ai-cfg-status.ok { border-color: #2e7d32; color: #2e7d32; }
+.ai-cfg-status.err { border-color: var(--primary); color: var(--primary); }
+
+[data-theme="dark"] .ai-cfg-status.ok { border-color: #66bb6a; color: #66bb6a; }
+
+.ai-cfg-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.ai-cfg-foot-right { display: flex; gap: 8px; }
+
+.ai-cfg-save {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+.ai-cfg-save:hover { background: var(--primary-dark); border-color: var(--primary-dark); color: #fff; }
+
+@media (max-width: 639px) {
+  .ai-cfg { width: calc(100vw - 16px); max-height: 92vh; }
+  .ai-cfg-form { padding: 0 15px 15px; max-height: 92vh; }
+  .ai-cfg-head { margin: 0 -15px 4px; padding: 13px 15px 10px; }
+  /* 16px keeps iOS from zooming the page when a field takes focus */
+  .ai-cfg-input { font-size: 16px; padding: 10px 12px; }
+  .ai-cfg-row2 { grid-template-columns: 1fr; }
+  .ai-cfg-foot { flex-direction: column-reverse; align-items: stretch; }
+  .ai-cfg-foot-right { display: grid; grid-template-columns: 1fr 1fr; }
+  .ai-cfg-reset, .ai-cfg-save, .ai-cfg-foot-right .sum-ai-btn { min-height: 40px; }
+}

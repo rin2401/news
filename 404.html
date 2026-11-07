@@ -13,7 +13,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=18">
+  <link rel="stylesheet" href="css/style.css?v=19">
 </head>
 <body>
   <!-- Top header -->
@@ -32,6 +32,9 @@
         <button class="theme-toggle" id="themeToggle" type="button" title="Chế độ tối/sáng" aria-label="Chuyển chế độ tối/sáng">
           <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg>
           <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7a5 5 0 1 0 5 5 5 5 0 0 0-5-5zm0-5 2.5 4h-5L12 2zm0 20-2.5-4h5L12 22zM2 12l4-2.5v5L2 12zm20 0-4 2.5v-5l4 2.5z"/></svg>
+        </button>
+        <button class="theme-toggle" id="aiCfgBtn" type="button" title="Cài đặt tóm tắt AI" aria-label="Cài đặt tóm tắt AI" aria-haspopup="dialog">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.14 12.94a7.4 7.4 0 0 0 .06-.94 7.4 7.4 0 0 0-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7 7 0 0 0-1.62-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54a7 7 0 0 0-1.62.94l-2.39-.96a.5.5 0 0 0-.6.22L2.68 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.4 7.4 0 0 0 0 1.88l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.38 1.04.7 1.62.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54a7 7 0 0 0 1.62-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.6A3.6 3.6 0 1 1 15.6 12 3.6 3.6 0 0 1 12 15.6z"/></svg>
         </button>
       </div>
     </div>
@@ -145,6 +148,64 @@
     </div>
   </footer>
 
+  <!-- AI summary settings. A native <dialog> gives focus trapping, Esc to
+       close and the ::backdrop for free. -->
+  <dialog class="ai-cfg" id="aiCfgDialog" aria-labelledby="aiCfgTitle">
+    <form method="dialog" class="ai-cfg-form" id="aiCfgForm">
+      <div class="ai-cfg-head">
+        <h2 id="aiCfgTitle">Cài đặt tóm tắt AI</h2>
+        <button class="ai-cfg-x" type="submit" value="cancel" aria-label="Đóng">✕</button>
+      </div>
+
+      <label class="ai-cfg-label" for="cfgProvider">Nhà cung cấp</label>
+      <select class="ai-cfg-input" id="cfgProvider"></select>
+      <p class="ai-cfg-hint" id="cfgProviderHint"></p>
+
+      <label class="ai-cfg-label" for="cfgModel">Model</label>
+      <input class="ai-cfg-input" id="cfgModel" list="cfgModelList" placeholder="Để trống dùng mặc định" autocomplete="off" spellcheck="false">
+      <datalist id="cfgModelList"></datalist>
+
+      <div class="ai-cfg-key-wrap" id="cfgKeyWrap" hidden>
+        <label class="ai-cfg-label" for="cfgApiKey">API key</label>
+        <div class="ai-cfg-key-row">
+          <input class="ai-cfg-input" id="cfgApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-...">
+          <button class="ai-cfg-reveal" id="cfgReveal" type="button" aria-label="Hiện/ẩn key">👁</button>
+        </div>
+        <p class="ai-cfg-hint ai-cfg-warn">Key chỉ lưu trong <code>localStorage</code> của trình duyệt này và gửi
+          trực tiếp tới nhà cung cấp — không qua máy chủ nào của News24.</p>
+      </div>
+
+      <div class="ai-cfg-key-wrap" id="cfgUrlWrap" hidden>
+        <label class="ai-cfg-label" for="cfgUrl">Endpoint (OpenAI-compatible)</label>
+        <input class="ai-cfg-input" id="cfgUrl" placeholder="https://..." autocomplete="off" spellcheck="false">
+      </div>
+
+      <label class="ai-cfg-label" for="cfgPrompt">Prompt hệ thống</label>
+      <textarea class="ai-cfg-input ai-cfg-textarea" id="cfgPrompt" rows="4" spellcheck="false"></textarea>
+
+      <div class="ai-cfg-row2">
+        <div>
+          <label class="ai-cfg-label" for="cfgMaxTokens">max_tokens</label>
+          <input class="ai-cfg-input" id="cfgMaxTokens" type="number" min="64" max="2048" step="1">
+        </div>
+        <div>
+          <label class="ai-cfg-label" for="cfgTemp">temperature</label>
+          <input class="ai-cfg-input" id="cfgTemp" type="number" min="0" max="2" step="0.1">
+        </div>
+      </div>
+
+      <p class="ai-cfg-status" id="cfgStatus" role="status" hidden></p>
+
+      <div class="ai-cfg-foot">
+        <button class="sum-ai-btn ai-cfg-reset" id="cfgReset" type="button">Khôi phục mặc định</button>
+        <div class="ai-cfg-foot-right">
+          <button class="sum-ai-btn" type="submit" value="cancel">Huỷ</button>
+          <button class="sum-ai-btn ai-cfg-save" id="cfgSave" type="button">Lưu</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
   <template id="tplSkeleton">
     <div class="skeleton-row">
       <div class="skeleton-thumb"></div>
@@ -156,6 +217,6 @@
     </div>
   </template>
 
-  <script src="js/app.js?v=21"></script>
+  <script src="js/app.js?v=22"></script>
 </body>
 </html>

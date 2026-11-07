@@ -1044,7 +1044,7 @@
 
   function loadAiSummary(link) {
     try {
-      const raw = localStorage.getItem("news24:ai:" + link);
+      const raw = localStorage.getItem("news24:ai:" + link + ":" + cacheBuster());
       if (!raw) return null;
       const { t, text } = JSON.parse(raw);
       if (!text || Date.now() - (t || 0) > AI_TTL) return null;
@@ -1057,57 +1057,251 @@
   function saveAiSummary(link, text) {
     try {
       localStorage.setItem(
-        "news24:ai:" + link,
+        "news24:ai:" + link + ":" + cacheBuster(),
         JSON.stringify({ t: Date.now(), text })
       );
     } catch {}
   }
 
-  // One prompt, shared by every provider, so switching provider cannot
-  // silently change the output style.
-  const AI_PROMPT =
+  // ---- user settings (BYOK) ----
+  // Everything the settings dialog writes lives under one localStorage key,
+  // so it is trivial to inspect, reset, or clear from devtools.
+  const AI_CFG_KEY = "news24:aicfg";
+
+  const AI_PROMPT_DEFAULT =
     "Bạn là trợ lý tóm tắt tin tức. Tóm tắt bài báo thành 3-4 câu " +
     "ngắn gọn, chắt lọc ý chính, bằng tiếng Việt. Chỉ trả về nội " +
     "dung tóm tắt, không mở đầu, không liệt kê.";
 
-  // Each provider: url, requests-per-minute cap, and buildBody/parse.
-  // `parse` returns the summary string (possibly empty), so the chain can
-  // move on to the next provider when one yields nothing usable.
-  const AI_PROVIDERS = [
-    {
-      name: "ovh-mistral",
+  // `keyless: true` providers need no account and are the default; any
+  // other choice needs the user's own API key (BYOK), stored locally only.
+  const AI_CFG_DEFAULT = {
+    provider: "ovh-mistral",
+    model: "", // blank = provider default
+    apiKey: "",
+    prompt: AI_PROMPT_DEFAULT,
+    maxTokens: 400,
+    temperature: 0.3,
+  };
+
+  // Provider catalogue. Every entry is an OpenAI-compatible chat endpoint
+  // except Gemini and Anthropic, which get their own builders. `perMinute`
+  // seeds the rate-limit governor; 0 means "user's own key, don't pace".
+  const AI_CATALOG = {
+    "ovh-mistral": {
+      label: "OVH Kepler — Mistral Small (miễn phí)",
       url: "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions",
       perMinute: 2,
-      buildBody: (content) =>
-        JSON.stringify({
-          model: "Mistral-Small-3.2-24B-Instruct-2506",
-          max_tokens: 400, // 3-4 Vietnamese sentences run ~120 tokens
-          temperature: 0.3,
-          messages: [
-            { role: "system", content: AI_PROMPT },
-            { role: "user", content },
-          ],
-        }),
-      parse: async (res) => {
-        const json = await res.json();
-        return json?.choices?.[0]?.message?.content || "";
-      },
+      keyless: true,
+      model: "Mistral-Small-3.2-24B-Instruct-2506",
+      models: [
+        "Mistral-Small-3.2-24B-Instruct-2506",
+        "Meta-Llama-3_3-70B-Instruct",
+        "gpt-oss-20b",
+      ],
     },
-    {
-      name: "pollinations",
+    "pollinations": {
+      label: "Pollinations — GPT-OSS 20B (miễn phí)",
       url: "https://text.pollinations.ai/",
       perMinute: 1,
-      buildBody: (content) =>
-        JSON.stringify({
-          model: "openai-fast",
+      keyless: true,
+      model: "openai-fast",
+      models: ["openai-fast"],
+    },
+    openai: {
+      label: "OpenAI",
+      url: "https://api.openai.com/v1/chat/completions",
+      perMinute: 0,
+      model: "gpt-4o-mini",
+      models: ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1-nano"],
+    },
+    gemini: {
+      label: "Google Gemini",
+      url: "https://generativelanguage.googleapis.com/v1beta/models",
+      perMinute: 0,
+      model: "gemini-2.0-flash",
+      models: ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash"],
+    },
+    deepseek: {
+      label: "DeepSeek",
+      url: "https://api.deepseek.com/chat/completions",
+      perMinute: 0,
+      model: "deepseek-chat",
+      models: ["deepseek-chat", "deepseek-reasoner"],
+    },
+    groq: {
+      label: "Groq",
+      url: "https://api.groq.com/openai/v1/chat/completions",
+      perMinute: 0,
+      model: "llama-3.3-70b-versatile",
+      models: [
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+        "mixtral-8x7b-32768",
+      ],
+    },
+    openrouter: {
+      label: "OpenRouter",
+      url: "https://openrouter.ai/api/v1/chat/completions",
+      perMinute: 0,
+      model: "google/gemini-2.0-flash-001",
+      models: [
+        "google/gemini-2.0-flash-001",
+        "openai/gpt-4o-mini",
+        "anthropic/claude-3.5-haiku",
+        "meta-llama/llama-3.3-70b-instruct",
+      ],
+    },
+    anthropic: {
+      label: "Anthropic Claude",
+      url: "https://api.anthropic.com/v1/messages",
+      perMinute: 0,
+      model: "claude-3-5-haiku-20241022",
+      models: [
+        "claude-3-5-haiku-20241022",
+        "claude-sonnet-4-20250514",
+        "claude-3-5-sonnet-20241022",
+      ],
+    },
+    custom: {
+      label: "Tuỳ chỉnh (OpenAI-compatible)",
+      url: "",
+      perMinute: 0,
+      model: "",
+      models: [],
+      custom: true,
+    },
+  };
+
+  function loadAiCfg() {
+    try {
+      const raw = localStorage.getItem(AI_CFG_KEY);
+      if (!raw) return { ...AI_CFG_DEFAULT };
+      const saved = JSON.parse(raw);
+      const cfg = { ...AI_CFG_DEFAULT, ...saved };
+      if (!AI_CATALOG[cfg.provider]) cfg.provider = AI_CFG_DEFAULT.provider;
+      if (!cfg.prompt || !cfg.prompt.trim()) cfg.prompt = AI_PROMPT_DEFAULT;
+      return cfg;
+    } catch {
+      return { ...AI_CFG_DEFAULT };
+    }
+  }
+
+  function saveAiCfg(cfg) {
+    try {
+      localStorage.setItem(AI_CFG_KEY, JSON.stringify(cfg));
+    } catch {}
+  }
+
+  let aiCfg = loadAiCfg();
+
+  // The summary cache is keyed by provider+model+prompt, so changing any of
+  // them does not silently serve text produced under the old settings.
+  function cacheBuster() {
+    const sig = [aiCfg.provider, aiCfg.model, aiCfg.prompt].join("|");
+    let h = 5381;
+    for (let i = 0; i < sig.length; i++) h = ((h << 5) + h + sig.charCodeAt(i)) | 0;
+    return (h >>> 0).toString(36);
+  }
+
+  // Turns the current settings into concrete requests. The chosen BYOK
+  // provider is tried first; the two key-less ones stay behind it as a
+  // safety net so a bad key or a missing model degrades instead of dying.
+  // Gemini and Anthropic are not OpenAI-shaped, hence their own builders.
+  function buildAiPlan() {
+    const plan = [];
+    const { provider, model, apiKey, prompt, maxTokens, temperature } = aiCfg;
+    const key = apiKey.trim();
+    const mdl = (model || "").trim();
+
+    if (provider === "gemini") {
+      plan.push({
+        name: "gemini",
+        url: `${AI_CATALOG.gemini.url}/${encodeURIComponent(mdl || AI_CATALOG.gemini.model)}:generateContent`,
+        perMinute: 0,
+        headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: prompt }] },
+          contents: [{ role: "user", parts: [{ text: "{CONTENT}" }] }],
+          generationConfig: { maxOutputTokens: maxTokens, temperature },
+        }),
+        extract: (json) =>
+          (json?.candidates?.[0]?.content?.parts || [])
+            .map((p) => p.text || "")
+            .join("")
+            .trim(),
+      });
+    } else if (provider === "anthropic") {
+      plan.push({
+        name: "anthropic",
+        url: AI_CATALOG.anthropic.url,
+        perMinute: 0,
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": key,
+          "anthropic-version": "2023-06-01",
+          // Anthropic blocks browser calls unless the caller opts in; this
+          // is their documented header for exactly this use case.
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model: mdl || AI_CATALOG.anthropic.model,
+          max_tokens: maxTokens,
+          temperature,
+          system: prompt,
+          messages: [{ role: "user", content: "{CONTENT}" }],
+        }),
+        extract: (json) =>
+          (json?.content || []).map((c) => c.text || "").join("").trim(),
+      });
+    } else {
+      const cat = AI_CATALOG[provider];
+      const headers = { "Content-Type": "application/json" };
+      if (key) headers.Authorization = "Bearer " + key;
+      plan.push({
+        name: provider,
+        // A custom provider's endpoint lives in the settings, not the catalog
+        url: (cat.custom ? aiCfg.customUrl || "" : cat.url).trim(),
+        perMinute: cat.perMinute,
+        headers,
+        body: JSON.stringify({
+          model: mdl || cat.model,
+          max_tokens: maxTokens,
+          temperature,
           messages: [
-            { role: "system", content: AI_PROMPT },
-            { role: "user", content },
+            { role: "system", content: prompt },
+            { role: "user", content: "{CONTENT}" },
           ],
         }),
-      parse: async (res) => await res.text(),
-    },
-  ];
+        extract: (json) => json?.choices?.[0]?.message?.content || "",
+        isText: provider === "pollinations",
+      });
+    }
+
+    // Key-less fallbacks, unless the user already picked one of them.
+    for (const name of ["ovh-mistral", "pollinations"]) {
+      if (name === provider) continue;
+      const cat = AI_CATALOG[name];
+      plan.push({
+        name,
+        url: cat.url,
+        perMinute: cat.perMinute,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: cat.model,
+          max_tokens: maxTokens,
+          temperature,
+          messages: [
+            { role: "system", content: prompt },
+            { role: "user", content: "{CONTENT}" },
+          ],
+        }),
+        extract: (json) => json?.choices?.[0]?.message?.content || "",
+        isText: name === "pollinations",
+      });
+    }
+    return plan.filter((p) => p.url);
+  }
 
   // ---- rate-limit governor ----
   // Tracks one timestamp queue per provider and refuses to send a request
@@ -1157,29 +1351,31 @@
     if (gateWait(provider) > 0) {
       return { error: "rate" }; // skip it - the next provider may be free
     }
+    const body = provider.body.split("{CONTENT}").join(JSON.stringify(content).slice(1, -1));
     let res;
     try {
-      res = await fetchWithTimeout(
-        provider.url,
-        60000,
-        { "Content-Type": "application/json" },
-        { method: "POST", body: provider.buildBody(content) }
-      );
+      res = await fetchWithTimeout(provider.url, 60000, provider.headers, {
+        method: "POST",
+        body,
+      });
     } catch (e) {
       return { error: "network" };
     }
     gateRecord(provider, res);
     if (!res.ok) {
-      // 429/402 = over quota, anything else 5xx = provider trouble
-      return { error: "HTTP " + res.status };
+      return { error: res.status === 401 || res.status === 403
+        ? "key" // bad/missing API key - surfaced to the user, not retried
+        : "HTTP " + res.status };
     }
     let text = "";
     try {
-      text = (await provider.parse(res)) || "";
+      text = provider.isText
+        ? await res.text()
+        : provider.extract(await res.json());
     } catch {
       return { error: "bad payload" };
     }
-    text = text.trim();
+    text = (text || "").trim();
     if (!text || text.length < 20 || text.length > 1500) {
       return { error: "bad payload" };
     }
@@ -1188,18 +1384,26 @@
 
   // Tries each provider in order; the first real summary wins. A provider
   // that is rate-limited, down or returns junk just hands over to the next.
+  // A rejected API key is different: it is reported instead of silently
+  // falling back, so the user knows their BYOK settings are wrong.
   async function aiSummarize() {
     const body = (artEls.body.innerText || "").replace(/\s+/g, " ").trim();
     if (body.length < 200) throw new Error("no body");
     const content = body.slice(0, 6000);
+    const plan = buildAiPlan();
+    if (!plan.length) throw new Error("AI no endpoint");
     let lastErr = "no provider";
-    for (const provider of AI_PROVIDERS) {
+    let sawKeyErr = false;
+    for (const provider of plan) {
       const out = await aiRequest(provider, content);
       if (out.text) return out.text;
       lastErr = out.error;
+      if (out.error === "key") sawKeyErr = true; // remember, do not abort
       if (out.error === "rate") continue; // try the next provider right away
     }
-    throw new Error("AI " + lastErr);
+    // A rejected key is the most actionable failure, even when a later
+    // provider failed for an unrelated reason - surface it instead.
+    throw new Error(sawKeyErr ? "AI key" : "AI " + lastErr);
   }
 
   // Background AI summary run (auto-triggered on render when not cached).
@@ -1218,9 +1422,10 @@
       }
     } catch (e) {
       if (artState.link === link) {
-        // keep the instant extractive summary on screen; both free
+        // keep the instant extractive summary on screen; the free
         // providers are IP-rate-limited, so offer a manual retry
-        artEls.sumAiBtn.textContent = "✨ Thử lại AI";
+        artEls.sumAiBtn.textContent =
+          e && e.message === "AI key" ? "⚠ Kiểm tra API key" : "✨ Thử lại AI";
       }
     } finally {
       if (artState.link === link) {
@@ -1252,6 +1457,172 @@
     artEls.sumAiBtn.textContent = "✨ Đang tóm tắt AI...";
     await runAiSummary(link);
   });
+
+  // ---- settings dialog ----
+  // The form is a plain <dialog>; values are read on open from `aiCfg` and
+  // committed on "Lưu". Saving drops the in-memory AI cache only when the
+  // provider/model/prompt actually changed, since the cache key embeds them.
+  const cfgEls = {
+    btn: document.getElementById("aiCfgBtn"),
+    dlg: document.getElementById("aiCfgDialog"),
+    provider: document.getElementById("cfgProvider"),
+    providerHint: document.getElementById("cfgProviderHint"),
+    model: document.getElementById("cfgModel"),
+    modelList: document.getElementById("cfgModelList"),
+    keyWrap: document.getElementById("cfgKeyWrap"),
+    apiKey: document.getElementById("cfgApiKey"),
+    reveal: document.getElementById("cfgReveal"),
+    urlWrap: document.getElementById("cfgUrlWrap"),
+    url: document.getElementById("cfgUrl"),
+    prompt: document.getElementById("cfgPrompt"),
+    maxTokens: document.getElementById("cfgMaxTokens"),
+    temp: document.getElementById("cfgTemp"),
+    status: document.getElementById("cfgStatus"),
+    save: document.getElementById("cfgSave"),
+    reset: document.getElementById("cfgReset"),
+  };
+  const customUrls = {}; // provider -> endpoint, remembered across opens
+
+  function cfgStatus(msg, kind) {
+    if (!cfgEls.status) return;
+    cfgEls.status.textContent = msg || "";
+    cfgEls.status.hidden = !msg;
+    cfgEls.status.className = "ai-cfg-status" + (kind ? " " + kind : "");
+  }
+
+  function syncCfgFields() {
+    const id = cfgEls.provider.value;
+    const cat = AI_CATALOG[id] || AI_CATALOG[AI_CFG_DEFAULT.provider];
+    const needsKey = !cat.keyless;
+    if (cfgEls.keyWrap) cfgEls.keyWrap.hidden = !needsKey;
+    if (cfgEls.urlWrap) cfgEls.urlWrap.hidden = !cat.custom;
+    if (cfgEls.model) cfgEls.model.placeholder = cat.model || "Để trống dùng mặc định";
+    if (cfgEls.modelList) {
+      cfgEls.modelList.innerHTML = (cat.models || [])
+        .map((m) => '<option value="' + m + '"></option>')
+        .join("");
+    }
+    if (cfgEls.providerHint) {
+      cfgEls.providerHint.textContent = cat.keyless
+        ? "Miễn phí, không cần API key. Giới hạn theo IP nên có thể phải chờ giữa các lần."
+        : "Cần API key của bạn. Key lưu cục bộ trong trình duyệt này.";
+    }
+  }
+
+  function openCfg() {
+    if (!cfgEls.dlg) return;
+    if (cfgEls.provider) {
+      cfgEls.provider.innerHTML = Object.entries(AI_CATALOG)
+        .map(
+          ([id, cat]) =>
+            '<option value="' + id + '">' + cat.label + "</option>"
+        )
+        .join("");
+      cfgEls.provider.value = aiCfg.provider;
+    }
+    if (cfgEls.model) cfgEls.model.value = aiCfg.model || "";
+    if (cfgEls.apiKey) cfgEls.apiKey.value = aiCfg.apiKey || "";
+    if (cfgEls.apiKey) cfgEls.apiKey.type = "password";
+    if (cfgEls.url) cfgEls.url.value = customUrls[aiCfg.provider] || aiCfg.customUrl || "";
+    if (cfgEls.prompt) cfgEls.prompt.value = aiCfg.prompt || AI_PROMPT_DEFAULT;
+    if (cfgEls.maxTokens) cfgEls.maxTokens.value = aiCfg.maxTokens;
+    if (cfgEls.temp) cfgEls.temp.value = aiCfg.temperature;
+    cfgStatus("");
+    syncCfgFields();
+    if (typeof cfgEls.dlg.showModal === "function") cfgEls.dlg.showModal();
+    else cfgEls.dlg.setAttribute("open", "");
+  }
+
+  function closeCfg() {
+    if (!cfgEls.dlg) return;
+    if (typeof cfgEls.dlg.close === "function") cfgEls.dlg.close();
+    else cfgEls.dlg.removeAttribute("open");
+  }
+
+  if (cfgEls.btn) cfgEls.btn.addEventListener("click", openCfg);
+  if (cfgEls.provider) {
+    cfgEls.provider.addEventListener("change", () => {
+      // remember a custom endpoint before switching away from it
+      if (cfgEls.url) customUrls[cfgEls.provider.value] = cfgEls.url.value;
+      syncCfgFields();
+      cfgStatus("");
+    });
+  }
+  if (cfgEls.reveal) {
+    cfgEls.reveal.addEventListener("click", () => {
+      cfgEls.apiKey.type = cfgEls.apiKey.type === "password" ? "text" : "password";
+    });
+  }
+  if (cfgEls.reset) {
+    cfgEls.reset.addEventListener("click", () => {
+      aiCfg = { ...AI_CFG_DEFAULT };
+      saveAiCfg(aiCfg);
+      openCfg();
+      cfgStatus("Đã khôi phục cài đặt mặc định.", "ok");
+    });
+  }
+  if (cfgEls.save) {
+    cfgEls.save.addEventListener("click", () => {
+      const provider = cfgEls.provider.value;
+      const cat = AI_CATALOG[provider] || AI_CATALOG[AI_CFG_DEFAULT.provider];
+      const prompt = (cfgEls.prompt.value || "").trim() || AI_PROMPT_DEFAULT;
+      const apiKey = (cfgEls.apiKey.value || "").trim();
+      const url = (cfgEls.url.value || "").trim();
+      const maxTokens = Math.min(
+        2048,
+        Math.max(64, parseInt(cfgEls.maxTokens.value, 10) || AI_CFG_DEFAULT.maxTokens)
+      );
+      const rawTemp = parseFloat(cfgEls.temp.value);
+      const temperature = Number.isFinite(rawTemp)
+        ? Math.min(2, Math.max(0, rawTemp))
+        : AI_CFG_DEFAULT.temperature;
+
+      if (!cat.keyless && !apiKey) {
+        cfgStatus("Hãy nhập API key cho " + cat.label + ".", "err");
+        cfgEls.apiKey.focus();
+        return;
+      }
+      if (cat.custom) {
+        if (!/^https:\/\/\S+$/i.test(url)) {
+          cfgStatus("Endpoint phải là một URL https:// hợp lệ.", "err");
+          cfgEls.url.focus();
+          return;
+        }
+        customUrls.custom = url;
+      }
+
+      const next = {
+        provider,
+        model: (cfgEls.model.value || "").trim(),
+        apiKey,
+        prompt,
+        maxTokens,
+        temperature,
+      };
+      const changed =
+        next.provider !== aiCfg.provider ||
+        next.model !== aiCfg.model ||
+        next.prompt !== aiCfg.prompt;
+      aiCfg = next;
+      if (cat.custom) aiCfg.customUrl = url;
+      saveAiCfg(aiCfg);
+      // New settings -> the old summaries were produced by a different
+      // model/prompt, so make the next article regenerate.
+      if (changed) {
+        artState.extractive = artState.extractive || "";
+        if (artEls.sumAiBtn) artEls.sumAiBtn.textContent = "✨ Tóm tắt bằng AI";
+      }
+      closeCfg();
+      // Re-run the summary for the article on screen under the new settings
+      const link = artState.link;
+      if (changed && link && artEls.body.innerText.trim().length >= 200) {
+        artEls.sumAiBtn.disabled = true;
+        artEls.sumAiBtn.classList.add("busy");
+        artEls.sumAiBtn.textContent = "✨ Đang tóm tắt AI...";
+        runAiSummary(link);
+      }
+    });
+  }
 
   function showBodyLoading() {
     stopTts(); // reading a summary of the previous article makes no sense

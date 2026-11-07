@@ -30,7 +30,10 @@ browser.
 
 ## AI summary
 
-Two free, key-less, CORS-enabled providers are used, in order:
+Works out of the box with two free, key-less, CORS-enabled providers, and
+can be pointed at your own API key (BYOK) from the ⚙️ button in the header.
+
+**Zero-config default chain:**
 
 | # | Provider | Model | Latency | Detail |
 |---|---|---|---|---|
@@ -42,12 +45,35 @@ benchmarked and returns clean Vietnamese prose. The Qwen and `gpt-oss-*`
 models on the same endpoint spend their whole token budget on hidden
 reasoning and came back with an empty `content`, so they are not used.
 
+**Bring your own key** — ⚙️ in the header opens the settings dialog:
+
+| Setting | Notes |
+|---|---|
+| Provider | OVH, Pollinations (free), or OpenAI, Gemini, DeepSeek, Groq, OpenRouter, Anthropic, or any OpenAI-compatible endpoint |
+| Model | Free-text with suggestions; blank = the provider's default |
+| API key | Stored in this browser's `localStorage` only, sent straight to the provider |
+| System prompt | Editable, so you can switch language or style |
+| `max_tokens`, `temperature` | Range-clamped on save |
+
+Your chosen provider runs first; the two key-less ones stay behind it as a
+fallback, so a bad key degrades to a working summary instead of failing.
+A *rejected* key is still reported (`⚠ Kiểm tra API key`) rather than
+silently masked by the fallback.
+
+The summary cache key embeds provider + model + prompt, so changing any of
+them regenerates instead of serving text produced under the old settings.
+
 A small client-side **rate-limit governor** paces requests: it keeps a
 per-provider sliding one-minute window, folds `Retry-After` /
 `ratelimit-reset` headers back into its own backoff, and skips a provider
 that would exceed its cap rather than sending a request that is going to be
-rejected. If both providers are unavailable the instant extractive summary
+rejected. If every provider is unavailable the instant extractive summary
 stays on screen and the button offers a retry.
+
+> **Note on keys:** GitHub Pages serves this site as a static file, so there
+> is no server to hold a secret. A key entered here lives in the browser and
+> is visible to anyone with access to that machine. Use a scoped, low-quota
+> key — and don't commit one.
 
 ## How it works
 
