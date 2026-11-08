@@ -25,7 +25,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=22">
+  <link rel="stylesheet" href="css/style.css?v=24">
 </head>
 <body>
   <!-- Top header -->
@@ -329,6 +329,37 @@
     </form>
   </dialog>
 
+  <!-- Chatbot (js/chatbot.js). Only the shell lives here: the log, chips and
+       context chip are filled by script, so a page without the script keeps
+       an inert launcher. Not a <dialog> because the panel must stay open
+       while the reader navigates articles behind it. -->
+  <button class="chat-fab" id="chatFab" type="button"
+          aria-expanded="false" aria-controls="chatPanel"
+          aria-label="Hỏi trợ lý tin tức" title="Hỏi trợ lý tin tức">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zM7 9h10v2H7V9zm0 4h7v2H7v-2zM7 5h10v2H7V5z"/></svg>
+    <span class="chat-fab-label">Hỏi AI</span>
+  </button>
+
+  <section class="chat-panel" id="chatPanel" hidden
+           role="dialog" aria-modal="false" aria-labelledby="chatTitle">
+    <header class="chat-head">
+      <h2 class="chat-title" id="chatTitle">Trợ lý tin tức</h2>
+      <div class="chat-head-tools">
+        <button id="chatNew" type="button" title="Cuộc trò chuyện mới" aria-label="Cuộc trò chuyện mới">＋</button>
+        <button id="chatCfg" type="button" title="Cài đặt AI" aria-label="Cài đặt AI">⚙</button>
+        <button id="chatClose" type="button" aria-label="Đóng">✕</button>
+      </div>
+    </header>
+    <div class="chat-ctx" id="chatCtx" hidden></div>
+    <div class="chat-log" id="chatLog" role="log" aria-live="polite"></div>
+    <div class="chat-chips" id="chatChips"></div>
+    <form class="chat-form" id="chatForm">
+      <textarea id="chatInput" rows="1" placeholder="Hỏi về bài báo hoặc chủ đề…" aria-label="Câu hỏi"></textarea>
+      <button class="chat-send" id="chatSend" type="submit" aria-label="Gửi">➤</button>
+    </form>
+    <p class="chat-foot" id="chatFoot">Câu trả lời do AI tạo, có thể sai — đối chiếu với bài gốc.</p>
+  </section>
+
   <template id="tplSkeleton">
     <div class="skeleton-row">
       <div class="skeleton-thumb"></div>
@@ -340,7 +371,9 @@
     </div>
   </template>
 
-  <script src="js/app.js?v=28"></script>
+  <script src="js/app.js?v=30"></script>
+  <!-- Chatbot: reads window.NewsChat + the news24:article event (app.js) -->
+  <script src="js/chatbot.js?v=2"></script>
   <!-- Stats charts. Self-guarding: no-ops when #viewStats is hidden -->
   <script src="js/stats.js?v=9"></script>
 </body>

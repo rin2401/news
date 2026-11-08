@@ -18,7 +18,9 @@ browser.
 - **In-page reader**: click an article to read it right on the page — full
   text is fetched via [r.jina.ai](https://r.jina.ai) (HTML mode) with the RSS
   proxies as fallback, sanitized to a tag whitelist (scripts/styles/trackers
-  stripped, lazy images resolved from `data-src`) and cached in memory
+  stripped, lazy images resolved from `data-src`) and cached in memory.
+  Inline clips keep their still frame and caption with a link to the player
+  on VnExpress — see [Video clips](#video-clips) for why they cannot play here
 - Live search, "load more" paging, relative timestamps ("2 giờ trước")
 - **[Thống kê](stats.html)**: số bài theo chủ đề / theo ngày, đọc thẳng từ
   các snapshot RSS trong `data/`
@@ -26,6 +28,9 @@ browser.
   instantly, then an AI summary swaps in when it arrives (cached 7 days)
 - **Read the summary aloud** via Google Translate TTS, with a reading-speed
   toggle (0.8/1/1.25/1.5×)
+- **Chatbot** (*Hỏi AI*): ask about the article you are reading, or find
+  articles by topic — grounded in the article text and the local snapshots,
+  never in the model's own knowledge
 - Dark mode toggle (persisted; respects `prefers-color-scheme`)
 - 10-minute `localStorage` cache for instant navigation + offline fallback
 - No build step, no dependencies — plain HTML/CSS/JS
@@ -124,6 +129,84 @@ stays on screen and the button offers a retry.
 > is visible to anyone with access to that machine. Use a scoped, low-quota
 > key — and don't commit one.
 
+## Chatbot
+
+Nút **Hỏi AI** ở góc phải dưới mở một khung chat. Nó trả lời hai loại câu hỏi,
+tự nhận loại theo câu chữ — không có công tắc chế độ:
+
+1. **Hỏi về bài đang đọc** — câu hỏi được gắn với bài đang mở trong trang đọc
+   (chip *Đang đọc: …* trên đầu khung). Phần trả lời chạy trên chính nội dung
+   bài đó.
+2. **Tìm báo theo chủ đề** — câu hỏi không phải dạng hỏi được tìm thẳng trong
+   kho tin cục bộ và trả về các thẻ kết quả (ảnh, tiêu đề, chuyên mục, thời
+   gian), bấm vào là mở bài ngay trong trang.
+
+Chưa mở bài nào (đang ở danh sách) thì mọi câu hỏi đều thành tìm kiếm; khung
+chat nói rõ điều đó trong lời chào.
+
+### Dựa vào đâu để trả lời
+
+- Bài đang đọc: nội dung do trang đọc đưa sang (`NewsChat.currentArticle()`),
+  cắt còn 6 000 ký tự trước khi gửi model. Hỏi về một bài khác (dán link
+  VnExpress) thì lấy toàn văn qua đúng đường tải của trang đọc — đã cache thì
+  không tải lại.
+- Tìm chủ đề: chỉ tìm trong `data/*.json`. Bản thân việc tìm **không gọi
+  mạng**; model chỉ chọn truy vấn ngắn và chuyên mục, tiêu đề/đường dẫn hiển
+  thị lấy từ kho tin chứ không lấy từ model.
+- Model trả về một câu trả lời cho bài đang đọc mà gần như không dùng từ ngữ
+  nào của bài thì câu đó **bị bỏ**, thay bằng trích nguyên văn các câu liên
+  quan trong bài. Không có câu trả lời từ AI thì khung chat vẫn tìm và hiện
+  kết quả, kèm một dòng tiếng Việt nói rõ là thiếu câu trả lời AI.
+
+**Dùng chung thiết lập với AI summary:** cùng chuỗi provider (OVH → các
+provider miễn phí → key của bạn), cùng bộ điều tiết rate limit, cùng hộp thoại
+⚙️. Đổi provider/model/key ở đó là đổi cho cả hai. AI tắt hẳn thì chat vẫn
+dùng được ở chế độ tìm + trích dẫn.
+
+### Đánh đổi
+
+- Kho tin chỉ là **bản chụp RSS gần nhất**: mỗi chuyên mục ~60 tin, hiện
+  khoảng 8 ngày gần nhất. Tin cũ hơn **không có** trong dữ liệu để tìm — khung
+  chat nói thẳng "không tìm thấy" chứ không bịa ra bài.
+- Câu hỏi về bài đang đọc cần tải được toàn văn bài qua `r.jina.ai`/proxy như
+  trang đọc; không tải được thì nó báo chứ không trả lời liều.
+- Provider miễn phí giới hạn theo IP (OVH 2 req/phút, Pollinations 1 lời/45 s),
+  nên trong lúc bận chat sẽ trả lời chậm hoặc bỏ lượt gọi AI. Lỗi xong thì nó
+  nghỉ một lúc (45 s nếu bị rate limit, 15 s nếu key bị từ chối) trước khi thử
+  lại, và có nút **Thử lại** / **Mở cài đặt AI**.
+- Model không được stream: một lượt chờ trọn câu trả lời, hiện dòng "Đang xử
+  lý…" trong lúc chờ.
+
+### Phím tắt và những gì lưu lại
+
+| Phím | Tác dụng |
+|---|---|
+| `Esc` | Đóng khung chat (không đụng tới hộp thoại Cài đặt AI) |
+| `/` | Mở khung chat và focus ô nhập — chỉ khi đang **không** gõ ở ô khác |
+| `Ctrl/⌘ + K` | Như trên, và vẫn chạy được khi đang gõ ở ô khác |
+| `Enter` / `Shift+Enter` | Gửi / xuống dòng |
+
+Mỗi bài (và danh sách) có cuộc trò chuyện riêng, giữ tối đa 8 lượt, lưu trong
+`localStorage`:
+
+| Khoá | Nội dung |
+|---|---|
+| `news24:chat:open` | Khung chat đang mở (`1`) hay đóng (`0`) |
+| `news24:chat:thread:<ngữ cảnh>` | Các lượt hỏi/đáp của một ngữ cảnh (`list`, hoặc `a:<link>` cho từng bài) |
+| `news24:chat:threads` | Danh sách ngữ cảnh đã lưu, tối đa 6 — cũ hơn bị đẩy ra khỏi đĩa |
+| `news24:chat:at:<ngữ cảnh>` | Mốc thời gian ghi gần nhất của ngữ cảnh đó |
+
+Lịch sử chỉ chứa câu hỏi và câu trả lời (mỗi mục cắt còn 400 ký tự) — **không
+lưu nội dung bài báo**. Nút **＋** xoá cuộc trò chuyện của ngữ cảnh đang mở.
+
+Hợp đồng giữa `js/chatbot.js` và `js/app.js` nằm ở
+[`docs/chat-contract.md`](docs/chat-contract.md); kiểm tra HTML/CSS/JS của
+tính năng này:
+
+```bash
+node tests/chat-check.mjs
+```
+
 ## How it works
 
 **Listings** read the same-origin snapshots in [`data/`](data/) —
@@ -152,6 +235,28 @@ edge cache.
 Each response is normalized into `{title, link, pubDate, img, sapo}` and
 rendered client-side. All feed text is escaped; only `http(s)` image URLs
 are allowed.
+
+## Video clips
+
+VnExpress embeds clips as HLS (`.../master.m3u8`, AES-128 encrypted `.ts`
+segments) on `d1.vnecdn.net`, and that host enforces **hotlink protection**:
+it answers `406`/`407` unless `Referer` is `vnexpress.net`, which a browser
+cannot set. Verified from Chrome — a plain `<video src>` fails with
+`DEMUXER_ERROR_COULD_NOT_PARSE` and `hls.js` fails with
+`manifestLoadError`. Article images (`i1-…`, `iv1-…`) are *not* restricted,
+which is why photos work and video does not.
+
+So the reader renders the still frame + caption in the story's original
+position, and links to the clip on VnExpress. `attachHlsPlayer()` still
+plays the clip when the page is served from an origin the CDN allows
+(self-hosted/reverse-proxied), using native HLS on Safari and lazily
+loading hls.js (jsDelivr, pinned by SRI) elsewhere.
+
+The sanitiser keeps these blocks via `.rd-video`: `liftVideos()` runs before
+the tag-strip pass, the player is exempted from `STRIP_SELECTOR` (its wrapper
+matches `[class*='box_']`), and `figure` cleanup keeps a figure that holds a
+`<video>`. Cached article HTML is stamped `ARTICLE_HTML_VERSION` so bodies
+cached by an older build (which dropped clips entirely) are refetched.
 
 ## Local development
 
@@ -213,7 +318,10 @@ index.html    # layout + categories
 stats.html    # trang thống kê (số bài theo chủ đề / theo ngày)
 css/style.css # VnExpress-inspired theme (light + dark)
 js/app.js     # RSS fetching, proxy fallback, caching, rendering
+js/chatbot.js # chatbot: hỏi về bài đang đọc, tìm báo theo chủ đề
 js/stats.js   # thống kê từ data/<slug>.json, tự vẽ biểu đồ
+docs/chat-contract.md # hợp đồng chat <-> app.js
+tests/chat-check.mjs  # kiểm tra HTML/CSS/JS của chatbot
 favicon.svg
 ```
 

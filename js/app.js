@@ -83,10 +83,59 @@
   // ------------------------------------------------------------------
   // Small helpers
   // ------------------------------------------------------------------
+  // Titles/sapos arrive from three sources that escape with different rules:
+  // raw RSS XML text nodes, rss2json's already-unescaped JSON, and the
+  // data/*.json snapshots. The snapshot parser keeps CDATA bodies raw, so a
+  // "&" inside a title is stored as "&amp;" and would ship to the DOM as the
+  // literal text "&amp;". Decode named/numeric entities exactly once here.
+  const NAMED_ENTITIES = {
+    amp: "&",
+    lt: "<",
+    gt: ">",
+    quot: '"',
+    apos: "'",
+    nbsp: "\u00a0",
+    ndash: "\u2013",
+    mdash: "\u2014",
+    lsquo: "\u2018",
+    rsquo: "\u2019",
+    ldquo: "\u201c",
+    rdquo: "\u201d",
+    hellip: "\u2026",
+  };
+
+  function decodeEntities(s) {
+    // Run twice at most: some proxies double-escape ("&amp;amp;").
+    const once = (str) =>
+      str.replace(/&(#[xX][0-9a-fA-F]+|#\d+|[a-zA-Z][a-zA-Z0-9]*);/g, (m, e) => {
+        if (e[0] === "#") {
+          const cp =
+            e[1] === "x" || e[1] === "X"
+              ? parseInt(e.slice(2), 16)
+              : parseInt(e.slice(1), 10);
+          if (!cp || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) return m;
+          try {
+            return String.fromCodePoint(cp);
+          } catch {
+            return m;
+          }
+        }
+        const named = NAMED_ENTITIES[e.toLowerCase()];
+        return named === undefined ? m : named;
+      });
+    let out = String(s || "");
+    for (let i = 0; i < 2 && /&[#a-zA-Z]/.test(out); i++) {
+      const next = once(out);
+      if (next === out) break;
+      out = next;
+    }
+    return out;
+  }
+
   function stripTags(s) {
     const el = document.createElement("div");
     el.innerHTML = s;
-    return (el.textContent || "").trim();
+    return decodeEntities((el.textContent || "").trim());
   }
 
   // Description CDATA = '<a href=...><img src=...></a></br> lead text'
@@ -257,8 +306,11 @@
       slug,
       cat: CATEGORIES[slug] || "Tin tức",
       pubDate: item.pubDate || Date.now(),
-      title: item.title || "(Không có tiêu đề)",
-      sapo: item.sapo || "",
+      // The snapshot parser keeps CDATA raw, so titles/sapos can still carry
+      // entities ("&amp;"). Decode here for every source: it is idempotent
+      // for text that was already unescaped.
+      title: decodeEntities(item.title) || "(Không có tiêu đề)",
+      sapo: decodeEntities(item.sapo),
       img: item.img || "",
       link: item.link || "https://vnexpress.net",
     });
@@ -693,6 +745,9 @@
 
   const articleCache = new Map(); // article link -> sanitized html
   const artState = { link: null, viaPush: false, extractive: "" };
+  // Item behind the article on screen - the detail-page path renders from
+  // the body alone, so keep the title/sapo/link for window.NewsChat.
+  let artItem = null;
 
   // Rendered cards by article link - lets card clicks transition to the
   // article view in place (pushState) instead of a full page load.
@@ -739,6 +794,41 @@
     if (statsView) statsView.hidden = name !== "stats";
     document.documentElement.classList.toggle("stats-view", name === "stats");
     syncAboutBox();
+    broadcastArticleView(name);
+  }
+
+  // Tells js/chatbot.js which article the reader is looking at (null when
+  // the page shows a list or the stats). showView() runs before a reader
+  // is re-rendered, so on the article path it emits from a microtask -
+  // after the synchronous render, and still before the network response
+  // that would paint the new body. The null case is synchronous: leaving
+  // the reader must clear the chat's context on the spot.
+  function broadcastArticleView(name) {
+    const clear = () => dispatchArticle(null);
+    if (document.documentElement.classList.contains("stats-view")) return clear();
+    const link = name === "article" ? artState.link : null;
+    if (!link || window.location.pathname.indexOf(relativeSlug(link)) < 0) return clear();
+    queueMicrotask(() => {
+      // the reader may have moved on (another article, or back to a list)
+      if (artState.link !== link || document.documentElement.classList.contains("stats-view")) {
+        return dispatchArticle(null);
+      }
+      dispatchArticle({
+        link,
+        // prefer the rendered header, but loadArticle() emits before the
+        // snapshots resolve and only knows the title from the fetched HTML
+        title: (artEls.title && artEls.title.textContent.trim()) || (artItem && artItem.title) || "",
+        sapo: (artEls.sapo && artEls.sapo.textContent) || "",
+      });
+    });
+  }
+
+  // The event is optional for readers of app.js: a missing constructor
+  // (very old browsers) must not take the reader down with it.
+  function dispatchArticle(detail) {
+    try {
+      document.dispatchEvent(new CustomEvent("news24:article", { detail }));
+    } catch {}
   }
 
   const ALLOWED_TOP = new Set([
@@ -811,8 +901,19 @@
   // Turn a cloned .fck_detail into safe reader HTML:
   // whitelist top-level tags, strip scripts/junk boxes, resolve
   // lazy-loaded images (data-src), neutralize every other attribute.
-  function sanitizeArticle(rootClone) {
-    rootClone.querySelectorAll(STRIP_SELECTOR).forEach((n) => n.remove());
+  function sanitizeArticle(rootClone, articleUrl) {
+    // Videos first: the strip pass below drops <video>/<source>/<iframe>,
+    // and VnExpress keeps the real player inside .box_embed_video, which
+    // the junk-box selector would remove too. Replace each clip with a
+    // clean <video> block we build ourselves, before anything is stripped.
+    liftVideos(rootClone, articleUrl);
+
+    // The blocks liftVideos() just built are ours, not VnExpress's junk boxes
+    // (.box_embed_video matches "[class*='box_']"), so they are exempt.
+    const own = (n) => n.closest("figure.rd-video");
+    rootClone.querySelectorAll(STRIP_SELECTOR).forEach((n) => {
+      if (!own(n)) n.remove();
+    });
 
     // unwrap <picture> so one plain <img> survives
     rootClone.querySelectorAll("picture").forEach((pic) => {
@@ -861,19 +962,33 @@
     // push the figcaption hundreds of pixels below its image.
     rootClone.querySelectorAll("*").forEach((el) => {
       if (el.tagName === "IMG" || el.tagName === "A") return; // handled above
+      // our own video blocks: keep the player's attributes (controls,
+      // preload, poster, src). Everything else is rebuilt below.
+      if (el.tagName === "VIDEO") {
+        [...el.attributes].forEach((a) => {
+          if (!VIDEO_KEEP_ATTRS.has(a.name)) el.removeAttribute(a.name);
+        });
+        return;
+      }
+      if (el.classList && el.classList.contains("rd-video")) {
+        [...el.attributes].forEach((a) => {
+          if (a.name !== "class") el.removeAttribute(a.name);
+        });
+        return;
+      }
       [...el.attributes].forEach((a) => el.removeAttribute(a.name));
     });
 
-    // figures that lost their image are stray captions - drop them
+    // figures that lost their media are stray captions - drop them
     rootClone.querySelectorAll("figure").forEach((f) => {
-      if (!f.querySelector("img")) f.remove();
+      if (!f.querySelector("img") && !f.querySelector("video")) f.remove();
     });
 
     const out = document.createElement("div");
     [...rootClone.children].forEach((child) => {
       if (ALLOWED_TOP.has(child.tagName)) {
-        const hasImg = child.querySelector("img");
-        if (!child.textContent.trim() && !hasImg) return; // skip empty blocks
+        const hasMedia = child.querySelector("img, video");
+        if (!child.textContent.trim() && !hasMedia) return; // skip empty blocks
         out.appendChild(child);
         return;
       }
@@ -893,8 +1008,8 @@
   // wrapping <div>s first. Keeps child order while it unwraps.
   function flattenInto(out, node) {
     if (ALLOWED_TOP.has(node.tagName)) {
-      const hasImg = node.querySelector("img");
-      if (node.textContent.trim() || hasImg) out.appendChild(node);
+      const hasMedia = node.querySelector("img, video");
+      if (node.textContent.trim() || hasMedia) out.appendChild(node);
       return;
     }
     // A media wrapper (block_thumb_picture, box_img_video, ...) is several
@@ -905,9 +1020,255 @@
     // recursion cannot reach them a second time (a wrapper with several
     // photos would otherwise duplicate every one).
     if (!node.textContent.trim()) {
-      [...node.querySelectorAll("img")].forEach((img) => out.appendChild(img));
+      [...node.querySelectorAll("img, figure.rd-video")].forEach((m) => out.appendChild(m));
     }
     [...node.children].forEach((c) => flattenInto(out, c));
+  }
+
+  // ---- videos ---------------------------------------------------------
+  // VnExpress ships clips as an adaptive HLS playlist (master.m3u8, served
+  // as "application/x-mpegURL"). Safari plays HLS natively; Chrome and
+  // Firefox do not, so those browsers get the MP4 renditions listed inside
+  // the playlist (see hlsMp4Sources()).
+  //
+  // The markup is a 4-level nest, and the player wrapper is display:none
+  // until VnExpress's own JS builds a player inside it:
+  //   <figure class="tplCaption">
+  //     <div class="fig-picture">…<img data-src="poster.jpg">…</div>
+  //     <div id="embed_video_N" class="box_embed_video" style="display:none">
+  //       <div><div><div>
+  //         <video src="…/master.m3u8"></video>
+  //     <figcaption class="desc_cation">…</figcaption>
+  //   </figure>
+  // So the poster and caption come from the <figure>, not from next to the
+  // <video>.
+  const VIDEO_SRC_RE = /\.m3u8(?:[?#]|$)/i;
+  // The only <video> attributes a reader-side player needs.
+  const VIDEO_KEEP_ATTRS = new Set(["controls", "preload", "playsinline", "poster", "src", "data-hls"]);
+
+  // Poster frames come from the image CDN (i1-/vcdn1-...), same as <img>.
+  function isTrustedImageUrl(u) {
+    return /^https:\/\/[a-z0-9-]+\.vnecdn\.net\//i.test(u || "");
+  }
+
+  // Same-origin (VnExpress CDN) only: never load media a proxy happened to
+  // return from somewhere else.
+  function isTrustedVideoUrl(u) {
+    return /^https:\/\/d\d+\.vnecdn\.net\//i.test(u || "") && VIDEO_SRC_RE.test(u || "");
+  }
+
+  function buildVideoBlock(src, poster, caption, sourceUrl) {
+    const fig = document.createElement("figure");
+    fig.className = "rd-video";
+    const video = document.createElement("video");
+    video.setAttribute("controls", "");
+    video.setAttribute("preload", "metadata");
+    video.setAttribute("playsinline", "");
+    if (isTrustedImageUrl(poster)) {
+      video.setAttribute("poster", poster);
+    }
+    // Src stays out of the markup: attachHlsPlayer() decides between native
+    // HLS (Safari) and hls.js. data-hls carries the playlist through the
+    // attribute sanitiser.
+    video.dataset.hls = src;
+    fig.appendChild(video);
+    if (caption || sourceUrl) {
+      const cap = document.createElement("figcaption");
+      if (caption) cap.appendChild(document.createTextNode(caption));
+      // The clip itself lives behind VnExpress's hotlink protection, so this
+      // link is the way to actually watch it.
+      if (sourceUrl) {
+        const link = document.createElement("a");
+        link.href = sourceUrl;
+        link.target = "_blank";
+        link.rel = "noopener";
+        link.className = "rd-video-link";
+        link.textContent = "▶ Xem video trên VnExpress";
+        if (caption) cap.appendChild(document.createTextNode(" "));
+        cap.appendChild(link);
+      }
+      fig.appendChild(cap);
+    }
+    return fig;
+  }
+
+  // Replace every VnExpress clip with a clean <figure class="rd-video">
+  // before the strip pass removes <video>/<source>/<iframe> and the junk
+  // boxes (.box_embed_video matches "[class*='box_']") that hold it.
+  function liftVideos(root, sourceUrl) {
+    [...root.querySelectorAll("video")].forEach((video) => {
+      const src = decodeAmp(video.getAttribute("src") || "");
+      if (!isTrustedVideoUrl(src)) {
+        video.remove();
+        return;
+      }
+      const vid = (/(\d+)\s*$/.exec(video.id || "") || [])[1] || "";
+      // The canonical wrapper is #embed_video_N; fall back to the nearest
+      // box_embed_video ancestor for markup that omits the id.
+      let wrapper =
+        (vid && root.querySelector(`[id='embed_video_${vid}']`)) ||
+        video.closest(".box_embed_video");
+      if (!wrapper || !root.contains(wrapper)) wrapper = video;
+
+      const fig = wrapper.closest("figure") || wrapper.parentElement || wrapper;
+
+      // poster: full-size frame from the figure <meta>, else the lazy <img>
+      let poster = "";
+      const meta = fig.querySelector && fig.querySelector("meta[itemprop='url']");
+      if (meta) poster = (meta.getAttribute("content") || "").trim();
+      if (!poster) {
+        const img = fig.querySelector && fig.querySelector("img");
+        if (img) poster = (img.getAttribute("data-src") || img.getAttribute("src") || "").trim();
+      }
+      poster = decodeAmp(poster).trim();
+
+      const capEl = fig.querySelector && fig.querySelector(".parser_title, figcaption");
+      const caption = capEl ? capEl.textContent.replace(/\s+/g, " ").trim() : "";
+
+      const block = buildVideoBlock(src, poster, caption, sourceUrl);
+      // Replace the player wrapper in place; when there is no wrapper, the
+      // video itself stands in.
+      wrapper.replaceWith(block);
+
+      // Drop the figure's now-redundant poster image: it is the same frame
+      // shown in the player, and its lazy <img> would render as a broken
+      // picture above the video (the data-src placeholder is a 1px gif).
+      if (fig && fig !== wrapper && root.contains(fig)) {
+        fig.querySelectorAll("meta, picture, img").forEach((n) => n.remove());
+      }
+    });
+  }
+
+  // VnExpress clips are HLS (AES-128 encrypted .ts segments) served from
+  // d1.vnecdn.net behind hotlink protection: the player CDN answers 406/407
+  // unless the Referer is vnexpress.net, and a browser cannot forge that
+  // header. So a clip embedded on this site cannot be played here at all -
+  // verified against Chrome and against native <video> HLS.
+  //
+  // What we DO render is the still frame + the caption, plus a link that
+  // opens the clip on VnExpress where it plays normally. That keeps the
+  // story's visuals and order intact instead of silently dropping the
+  // media, which is what the old sanitiser did.
+  //
+  // The player is only attached when the CDN is reachable from the current
+  // origin (self-hosted / reverse-proxied deployments, where Referer checks
+  // do not apply). Probing is a single HEAD per page; failure is cached so
+  // github.io visitors do not pay for it on every article.
+  const HLS_CDN = "https://cdn.jsdelivr.net/npm/hls.js@1.5.20/dist/hls.min.js";
+  const HLS_SRI = "sha384-V5ruNBgmYcC3SJRUQeNykAAAgde5gOFq/Hu0CZj7bygDP0yRIhkvX8+w0u/7mRvr";
+  const NATIVE_HLS = (() => {
+    try {
+      return !!document.createElement("video").canPlayType("application/vnd.apple.mpegurl");
+    } catch {
+      return false;
+    }
+  })();
+
+  let videoCdnOk = null; // null = untested, false = hotlink-blocked
+  let hlsLoading = null;
+  let hlsBroken = false;
+
+  // Can this origin actually fetch VnExpress media? One ranged GET (small,
+  // cached by the CDN) answers it; 200 = yes, anything else = hotlink block.
+  async function videoCdnReachable(src) {
+    if (videoCdnOk !== null) return videoCdnOk;
+    try {
+      const res = await fetchWithTimeout(src, 8000, { Range: "bytes=0-0" });
+      videoCdnOk = res.ok;
+    } catch {
+      videoCdnOk = false;
+    }
+    return videoCdnOk;
+  }
+
+  function loadHlsJs() {
+    if (window.Hls) return Promise.resolve(window.Hls);
+    if (hlsBroken) return Promise.reject(new Error("hls.js unavailable"));
+    if (hlsLoading) return hlsLoading;
+    hlsLoading = new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = HLS_CDN;
+      s.async = true;
+      s.crossOrigin = "anonymous";
+      // SRI pins the exact bytes we reviewed: a tampered CDN file fails
+      // closed instead of executing.
+      s.integrity = HLS_SRI;
+      s.onload = () => (window.Hls ? resolve(window.Hls) : reject(new Error("hls.js missing")));
+      s.onerror = () => reject(new Error("hls.js blocked"));
+      document.head.appendChild(s);
+    }).catch((e) => {
+      hlsBroken = true; // one failure per page is enough
+      throw e;
+    });
+    return hlsLoading;
+  }
+
+  // Mark a clip as "not playable here": keep the still frame, drop the dead
+  // player chrome, and make the caption lead to the real video.
+  function degradeVideo(fig, why) {
+    fig.classList.add("rd-video--static");
+    if (why) fig.dataset.reason = why;
+    const video = fig.querySelector("video");
+    if (video) {
+      video.removeAttribute("controls");
+      video.removeAttribute("src");
+      video.setAttribute("muted", "");
+    }
+  }
+
+  // Attach a player to each clip in `scope`, or degrade it to the poster.
+  // Runs after every article render; cheap when the CDN is known to block.
+  async function attachHlsPlayer(scope) {
+    if (!scope) return;
+    const figs = [...scope.querySelectorAll("figure.rd-video")];
+    const pending = figs.filter((f) => !f.dataset.player);
+    if (!pending.length) return;
+
+    const first = pending[0].querySelector("video[data-hls]");
+    const playlist = first && first.dataset.hls;
+    if (!playlist) return;
+
+    if (!(await videoCdnReachable(playlist))) {
+      pending.forEach((f) => degradeVideo(f, "hotlink"));
+      return;
+    }
+
+    if (NATIVE_HLS) {
+      pending.forEach((f) => {
+        f.dataset.player = "native";
+        const v = f.querySelector("video");
+        v.setAttribute("src", v.dataset.hls);
+        v.removeAttribute("data-hls");
+      });
+      return;
+    }
+
+    let Hls;
+    try {
+      Hls = await loadHlsJs();
+    } catch {
+      pending.forEach((f) => degradeVideo(f, "no-hls"));
+      return;
+    }
+    for (const fig of pending) {
+      const video = fig.querySelector("video");
+      if (!video || !video.dataset.hls) continue;
+      fig.dataset.player = "hls";
+      const src = video.dataset.hls;
+      video.removeAttribute("data-hls");
+      if (!Hls.isSupported()) {
+        degradeVideo(fig, "unsupported");
+        continue;
+      }
+      const hls = new Hls({ enableWorker: true });
+      hls.loadSource(src);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.ERROR, (_e, data) => {
+        if (!data || !data.fatal) return;
+        hls.destroy();
+        degradeVideo(fig, "stream");
+      });
+    }
   }
 
   function urlBasename(u) {
@@ -959,6 +1320,7 @@
   // its credit under the lead.
   function applyArticleBody(html) {
     artEls.body.innerHTML = html;
+    attachHlsPlayer(artEls.body); // lazy hls.js for Safari-less browsers
     if (artEls.lead.hidden) return;
     const leadName = urlBasename(artEls.leadImg.getAttribute("src"));
     const first = artEls.body.querySelector("img");
@@ -1070,7 +1432,7 @@
     if (typeof fckOrHtml === "string") {
       html = fckOrHtml;
     } else if (fckOrHtml) {
-      html = sanitizeArticle(fckOrHtml);
+      html = sanitizeArticle(fckOrHtml, item.link);
     }
     const textLen = html ? html.replace(/<[^>]*>/g, "").trim().length : 0;
     if (html && textLen >= 80) {
@@ -1492,6 +1854,156 @@
     throw new Error(sawKeyErr ? "AI key" : "AI " + lastErr);
   }
 
+  // ------------------------------------------------------------------
+  // Bridge for js/chatbot.js
+  // ------------------------------------------------------------------
+  // The chatbot ships as its own script and needs four things from here:
+  // the open article, article bodies by link, the snapshot item list, and
+  // the provider chain above (with its rate-limit governor). Nothing below
+  // renders or reasons about conversation - that stays in chatbot.js.
+  function articleUrl(link) {
+    return /^https:\/\/vnexpress\.net\/[a-z0-9-]+-\d+\.html$/i.test(link || "")
+      ? link
+      : "";
+  }
+
+  // Sanitized reader HTML -> plain text for a model prompt: block ends
+  // become sentence stops so the text does not run words together.
+  function htmlToText(html) {
+    const box = document.createElement("div");
+    box.innerHTML = html || "";
+    box.querySelectorAll(
+      "p,h2,h3,h4,li,blockquote,figcaption,td,th,br,hr"
+    ).forEach((n) => n.append(" "));
+    return (box.textContent || "").replace(/\s+/g, " ").trim();
+  }
+
+  // One chat turn. chat(spec) takes the messages because the caller writes
+  // the instructions; buildAiPlan() still owns provider choice, and the
+  // returned providers keep `perMinute: 0` for key-less endpoints, which
+  // the governor reads as "waiting is not worth it" - so pacing is redone
+  // here from the catalogue value.
+  async function aiChatTurn(spec) {
+    const messages = ((spec && spec.messages) || []).filter(
+      (m) => m && typeof m.content === "string" && m.content.trim() &&
+        (m.role === "user" || m.role === "assistant")
+    );
+    if (!messages.length) throw new Error("AI no messages");
+    const system = String((spec && spec.system) || "").trim();
+    const maxTokens = Math.min(2048, Math.max(64, (spec && spec.maxTokens) || 600));
+    const rawTemp = spec ? parseFloat(spec.temperature) : NaN;
+    const temperature = Number.isFinite(rawTemp)
+      ? Math.min(2, Math.max(0, rawTemp))
+      : 0.2;
+
+    // Same credentials as buildAiPlan(), different message list: the
+    // summary prompt stays out of the conversation entirely.
+    const saved = aiCfg;
+    aiCfg = { ...saved, prompt: system, maxTokens, temperature };
+    let plan;
+    try {
+      plan = buildAiPlan();
+    } finally {
+      aiCfg = saved;
+    }
+    if (!plan.length) throw new Error("AI no endpoint");
+
+    const chatMessages = messages.slice(-12);
+    // Every provider template carries the turn as one "{CONTENT}" user
+    // message, so the conversation is flattened into a JSON block there.
+    const turn = JSON.stringify(chatMessages);
+    let lastErr = "no provider";
+    let sawKey = false;
+    for (const p of plan) {
+      const perMinute =
+        p.perMinute || (AI_CATALOG[p.name] && AI_CATALOG[p.name].perMinute) || 0;
+      if (perMinute > 0 && gateWait({ name: p.name, perMinute }) > 0) {
+        lastErr = "rate"; // skip it - another provider may still be free
+        continue;
+      }
+      const body = p.body.split("{CONTENT}").join(JSON.stringify(turn).slice(1, -1));
+      let res;
+      try {
+        res = await fetchWithTimeout(p.url, 60000, p.headers, { method: "POST", body });
+      } catch {
+        lastErr = "network";
+        continue;
+      }
+      gateRecord({ name: p.name, perMinute }, res);
+      if (res.status === 401 || res.status === 403) {
+        sawKey = true;
+        lastErr = "key";
+        continue;
+      }
+      if (!res.ok || res.status === 429 || res.status === 402) {
+        lastErr = "rate"; // 402 = Pollinations out of its free quota
+        continue;
+      }
+      let text = "";
+      let toolCalls = null;
+      try {
+        if (p.isText) {
+          text = await res.text();
+        } else {
+          const json = await res.json();
+          const msg = json && json.choices && json.choices[0] && json.choices[0].message;
+          // A model that answers with a tool call puts NOTHING in `content`
+          // (measured: OVH/Mistral returns content: undefined, finish_reason
+          // "tool_calls"). Reading content alone would drop the call and let
+          // the raw JSON leak into the reply, so prefer the structured
+          // calls and re-serialise them into the one shape chatbot.js parses.
+          if (msg && Array.isArray(msg.tool_calls) && msg.tool_calls.length) {
+            const fn = msg.tool_calls[0].function || {};
+            toolCalls = { name: fn.name, arguments: fn.arguments };
+          } else {
+            text = p.extract(json);
+          }
+        }
+      } catch {
+        lastErr = "bad payload";
+        continue;
+      }
+      if (toolCalls) {
+        return { text: JSON.stringify(toolCalls), toolCalls }; // toolCalls: a parse, not a guess
+      }
+      text = (text || "").trim();
+      if (!text) {
+        lastErr = "empty answer";
+        continue;
+      }
+      return { text };
+    }
+    throw new Error(sawKey ? "AI key" : "AI " + lastErr);
+  }
+
+  // Snapshot items merged across categories (one article usually appears in
+  // several), newest first. Cached for the session - a page load is not
+  // going to see fresher data than the list view already fetched.
+  let allItemsPromise = null;
+  function allItems() {
+    if (allItemsPromise) return allItemsPromise;
+    allItemsPromise = Promise.allSettled(
+      Object.keys(CATEGORIES).map((catSlug) =>
+        fetch("data/" + catSlug + ".json", { cache: "no-cache" })
+          .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
+          .then((d) => (d.items || []).map((it) => decorate(it, catSlug)))
+      )
+    ).then((results) => {
+      const byLink = new Map();
+      results.forEach((r) => {
+        if (r.status !== "fulfilled") return;
+        r.value.forEach((it) => {
+          if (it.link && !byLink.has(it.link)) byLink.set(it.link, it);
+        });
+      });
+      const items = [...byLink.values()].sort((a, b) => b.pubDate - a.pubDate);
+      // an empty snapshot set (offline, first load) must not stick
+      if (!items.length) allItemsPromise = null;
+      return items;
+    });
+    return allItemsPromise;
+  }
+
   // Background AI summary run (auto-triggered on render when not cached).
   // One run per link at a time; on failure the extractive version stays
   // visible and the button offers a manual retry.
@@ -1710,6 +2222,77 @@
     });
   }
 
+  // ---- chatbot bridge (see docs/chat-contract.md) ----
+  // Exposed once openCfg and everything it reads exist, and before
+  // js/chatbot.js (which loads next) has its own DOMContentLoaded work.
+  function currentArticle() {
+    const link = articleUrl(artState.link);
+    if (!link) return null;
+    const slug = `${location.pathname}${location.hash}`.indexOf(relativeSlug(link)) >= 0;
+    if (!slug) return null; // the reader is on a list for this article
+    const bodyText = (artEls.body.innerText || "").replace(/\s+/g, " ").trim();
+    return {
+      link,
+      title:
+        (artEls.title && artEls.title.textContent && artEls.title.textContent.trim()) ||
+        (artItem && artItem.title) ||
+        "Bài viết",
+      sapo: (artEls.sapo && artEls.sapo.textContent) || "",
+      cat: (artEls.cat && artEls.cat.textContent) || "Tin tức",
+      bodyText: bodyText.slice(0, 12000),
+      extractive: artState.extractive || "",
+    };
+  }
+
+  // Full article for a link the user brought up in chat. An article that is
+  // not in the snapshots still renders - decorate() fills the gaps.
+  async function getArticle(link) {
+    const href = articleUrl(link);
+    if (!href) throw new Error("bad link");
+    const item =
+      itemIndex.get(href) ||
+      (await allItems()).find((i) => i.link === href) ||
+      decorate({ title: "Bài viết", link: href, pubDate: Date.now() }, "");
+    try {
+      const html = await fetchArticleBody(item);
+      const text = htmlToText(html);
+      if (!text) throw new Error("empty body");
+      return { item, text, html, interactive: false };
+    } catch (e) {
+      // a quiz/live widget cannot be fetched as HTML by anyone - say so
+      // instead of handing the caller a bare failure
+      const interactive = !!(e && e.interactive);
+      throw Object.assign(new Error(interactive ? "interactive" : "unavailable"), {
+        interactive,
+        item,
+      });
+    }
+  }
+
+  function openArticleBySlug(slug) {
+    const m = /^([a-z0-9-]+-\d+)\.html?$/i.exec(String(slug || ""));
+    if (!m) return false;
+    const link = "https://vnexpress.net/" + m[1] + ".html";
+    const item = itemIndex.get(link);
+    if (item) openArticleInPlace(item, false);
+    else loadArticle(m[1]);
+    return true;
+  }
+
+  try {
+    window.NewsChat = {
+      version: 1,
+      currentArticle,
+      getArticle,
+      openArticle: openArticleBySlug,
+      allItems,
+      chat: aiChatTurn,
+      openSettings: openCfg,
+    };
+  } catch (e) {
+    /* a read-only global (hardened browser) just means no chatbot */
+  }
+
   function showBodyLoading() {
     stopTts(); // reading a summary of the previous article makes no sense
     artEls.fallback.hidden = true;
@@ -1720,11 +2303,16 @@
 
   // Persist sanitized article HTML for ~24h so repeat visits skip the
   // jina/proxy round trip even after a full page load.
+  // Bumped when the sanitiser's output shape changes, so a reader who has
+  // the old markup cached (e.g. bodies from before videos were kept) does not
+  // keep being served it for 24h. 2 = inline videos are preserved.
+  const ARTICLE_HTML_VERSION = 2;
+
   function saveArticleHtml(link, html) {
     try {
       localStorage.setItem(
         "news24:art:" + link,
-        JSON.stringify({ t: Date.now(), html })
+        JSON.stringify({ t: Date.now(), v: ARTICLE_HTML_VERSION, html })
       );
     } catch {
       /* quota / private mode - ignore */
@@ -1735,8 +2323,9 @@
     try {
       const raw = localStorage.getItem("news24:art:" + link);
       if (!raw) return null;
-      const { t, html } = JSON.parse(raw);
+      const { t, v, html } = JSON.parse(raw);
       if (!html || Date.now() - (t || 0) > 24 * 3600e3) return null;
+      if (v !== ARTICLE_HTML_VERSION) return null; // stale shape - refetch
       return html;
     } catch {
       return null;
@@ -1750,7 +2339,7 @@
       articleCache.set(item.link, saved);
       return saved;
     }
-    return sanitizeArticle(await fetchArticleHtml(item.link)); // may throw
+    return sanitizeArticle(await fetchArticleHtml(item.link), item.link); // may throw
   }
 
   // ---- Read the summary aloud (TTS) ----
@@ -1955,6 +2544,7 @@
   // while rendering without a page load (and the 404-trick still serves
   // the same page on hard load / shared links).
   function openArticleInPlace(item, viaPop) {
+    artItem = item;
     artState.link = item.link;
     artState.viaPush = !viaPop;
     if (!viaPop) history.pushState({ art: item.link }, "", relativeSlug(item.link));
@@ -1977,6 +2567,7 @@
   // comes from the snapshots, body from cache or the proxy chain.
   async function loadArticle(slug) {
     const link = "https://vnexpress.net/" + slug + ".html";
+    artItem = null;
     artState.link = link;
     artState.viaPush = false;
     showView("article");
@@ -2006,8 +2597,11 @@
     if (!item) {
       item = decorate({ title: "Bài viết", link, pubDate: Date.now() }, "");
     }
+    artItem = item;
     renderArticleHeader(item);
     renderArticleBody(item, html || fck, fckErr);
+    // the header landed after showView() already announced this article
+    broadcastArticleView("article");
   }
 
   // Card clicks (list + sidebar) with plain slug.html hrefs become

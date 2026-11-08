@@ -31,13 +31,37 @@ const FEEDS = [
 ];
 
 function decodeEntities(s) {
-  return String(s || "")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#0?39;/g, "'")
-    .replace(/&apos;/g, "'");
+  // Entities can be nested ("&amp;amp;") when the feed escapes an already
+  // escaped body - peel at most two layers so text stays faithful.
+  let out = String(s || "");
+  for (let i = 0; i < 2 && /&[#a-zA-Z]/.test(out); i++) {
+    const next = out
+      .replace(/&#[xX]([0-9a-fA-F]+);/g, (_, h) => safeFromCp(parseInt(h, 16), _))
+      .replace(/&#(\d+);/g, (m, d) => safeFromCp(parseInt(d, 10), m))
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&nbsp;/g, "\u00a0")
+      .replace(/&ndash;/g, "\u2013")
+      .replace(/&mdash;/g, "\u2014")
+      .replace(/&lsquo;|&rsquo;/g, (m) => (m === "&lsquo;" ? "\u2018" : "\u2019"))
+      .replace(/&ldquo;|&rdquo;/g, (m) => (m === "&ldquo;" ? "\u201c" : "\u201d"))
+      .replace(/&hellip;/g, "\u2026");
+    if (next === out) break;
+    out = next;
+  }
+  return out;
+}
+
+function safeFromCp(cp, fallback) {
+  if (!cp || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) return fallback;
+  try {
+    return String.fromCodePoint(cp);
+  } catch {
+    return fallback;
+  }
 }
 
 function stripTags(html) {
