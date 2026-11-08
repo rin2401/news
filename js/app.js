@@ -1140,13 +1140,17 @@
     box.appendChild(badge);
 
     link.appendChild(box);
-    fig.appendChild(link);
 
+    // The caption is part of the link, not a sibling: readers tap the text
+    // as often as the frame, and a sibling <figcaption> swallowed those taps
+    // (verified with Playwright - nothing happened).
     if (caption) {
       const cap = document.createElement("figcaption");
       cap.textContent = caption;
-      fig.appendChild(cap);
+      link.appendChild(cap);
     }
+
+    fig.appendChild(link);
     // Kept so a future deployment (self-hosted / proxied) can still attach
     // a real player; unused while the CDN blocks this origin.
     fig.dataset.hls = src;

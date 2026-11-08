@@ -2880,3 +2880,18 @@ html.chat-open .chat-fab { display: none; }
 .reader-body .rd-video-frame img {
   height: 100%;
 }
+
+/* The caption lives inside the link now, so it inherits link styling:
+   reset it so it reads as a caption and not as a hyperlink. */
+.reader-body .rd-video-poster figcaption {
+  display: block;
+  margin-top: 8px;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.45;
+  text-decoration: none;
+}
+
+.reader-body .rd-video-poster:hover figcaption {
+  text-decoration: underline;
+}
