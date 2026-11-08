@@ -581,7 +581,9 @@
 
   els.nav.addEventListener("click", (e) => {
     const link = e.target.closest(".nav-link");
-    if (!link) return;
+    // Only category links carry data-slug; the "Thống kê" link is a real
+    // page navigation and must fall through to the browser.
+    if (!link || !link.dataset.slug) return;
     e.preventDefault();
     const slug = link.dataset.slug;
     history.pushState(null, "", "./" + slug);
@@ -721,7 +723,8 @@
   const wideLayout = window.matchMedia("(min-width: 1024px)");
   const aboutBox = document.querySelector(".side-about");
   function syncAboutBox() {
-    if (aboutBox) aboutBox.hidden = !wideLayout.matches;
+    const stats = document.documentElement.classList.contains("stats-view");
+    if (aboutBox) aboutBox.hidden = stats || !wideLayout.matches;
   }
   syncAboutBox();
   wideLayout.addEventListener("change", syncAboutBox);
@@ -729,6 +732,12 @@
   function showView(name) {
     artEls.listView.hidden = name !== "list";
     artEls.view.hidden = name !== "article";
+    // The stats view is server-rendered into 404.html and driven by
+    // js/stats.js, which loads after this script and draws once it sees
+    // #viewStats visible (see /.stats-view).
+    const statsView = document.getElementById("viewStats");
+    if (statsView) statsView.hidden = name !== "stats";
+    document.documentElement.classList.toggle("stats-view", name === "stats");
     syncAboutBox();
   }
 
@@ -736,6 +745,11 @@
     "P", "H2", "H3", "H4", "FIGURE", "TABLE", "UL", "OL",
     "BLOCKQUOTE", "IMG", "HR",
   ]);
+  // Same set as a CSS selector - used to tell a layout wrapper (has
+  // readable blocks inside, worth unwrapping) from junk to just drop.
+  const ALLOWED_TOP_SELECTOR = [...ALLOWED_TOP]
+    .map((t) => (t === "IMG" || t === "HR" ? t : t.toLowerCase()))
+    .join(",");
   const STRIP_SELECTOR = [
     "script", "style", "iframe", "form", "input", "button", "noscript",
     "svg", "video", "audio", "object", "embed", "source", "h1",
@@ -857,12 +871,43 @@
 
     const out = document.createElement("div");
     [...rootClone.children].forEach((child) => {
-      if (!ALLOWED_TOP.has(child.tagName)) return;
-      const hasImg = child.querySelector("img");
-      if (!child.textContent.trim() && !hasImg) return; // skip empty blocks
-      out.appendChild(child);
+      if (ALLOWED_TOP.has(child.tagName)) {
+        const hasImg = child.querySelector("img");
+        if (!child.textContent.trim() && !hasImg) return; // skip empty blocks
+        out.appendChild(child);
+        return;
+      }
+      // Layout wrappers: product/photo templates (item_slide_show,
+      // wrap_pic, width-detail-photo) put every <p> and <img> inside
+      // plain <div>s, so a flat whitelist would drop the whole body.
+      // Unwrap the wrapper and lift its allowed blocks instead of
+      // losing them - nested wrappers are handled height-first.
+      const inner = child.querySelector(ALLOWED_TOP_SELECTOR);
+      if (!inner) return; // nothing readable inside - drop the wrapper
+      [...child.children].forEach((c) => flattenInto(out, c));
     });
     return out.innerHTML;
+  }
+
+  // Move `node` into `out` as an allowed top-level block, peeling away
+  // wrapping <div>s first. Keeps child order while it unwraps.
+  function flattenInto(out, node) {
+    if (ALLOWED_TOP.has(node.tagName)) {
+      const hasImg = node.querySelector("img");
+      if (node.textContent.trim() || hasImg) out.appendChild(node);
+      return;
+    }
+    // A media wrapper (block_thumb_picture, box_img_video, ...) is several
+    // divs deep, so its <img> is never a direct child: lift the photos out
+    // as their own blocks rather than walking past them. Only when the
+    // wrapper carries no text of its own - otherwise the caption/paragraph
+    // walk below already contains the photo. Detach them first so the
+    // recursion cannot reach them a second time (a wrapper with several
+    // photos would otherwise duplicate every one).
+    if (!node.textContent.trim()) {
+      [...node.querySelectorAll("img")].forEach((img) => out.appendChild(img));
+    }
+    [...node.children].forEach((c) => flattenInto(out, c));
   }
 
   function urlBasename(u) {
@@ -963,6 +1008,47 @@
     return picked.join(" ") + (len >= 380 ? "…" : "");
   }
 
+  // ---- summary body: one bullet per key point ----
+  // The AI/extractive text comes back as one run-on string such as
+  // "- Ý một. - Ý hai. - Ý ba." (models ignore "no list" instructions and
+  // the extractive pass joins sentences with a space). Split on an inline
+  // bullet mark: a dash after whitespace, followed by a capital or digit.
+  // That leaves in-word/number hyphens alone ("4,5-5% GDP", "e-mail").
+  // No bullet marks at all -> fall back to one sentence per line.
+  const SUM_BULLET = /(?<=\s)[-–—•*·]\s+(?=[\p{Lu}\p{N}"“(])/gu;
+
+  function summaryPoints(text) {
+    const raw = String(text || "").replace(/\s+/g, " ").trim();
+    if (!raw) return [];
+    // Drop the leading bullet mark too: the first one is not preceded by
+    // whitespace, so the split above leaves it attached to point #1.
+    const trim = (s) => s.trim().replace(/^[-–—•*·]\s*/, "");
+    let parts = raw.split(SUM_BULLET).map(trim).filter(Boolean);
+    if (parts.length < 2) {
+      parts = raw.split(/(?<=[.!?…])\s+/).map((p) => p.trim()).filter(Boolean);
+    }
+    return parts.length ? parts : [raw];
+  }
+
+  function renderSummary(text) {
+    const points = summaryPoints(text);
+    artEls.summaryText.textContent = "";
+    for (const p of points) {
+      const li = document.createElement("li");
+      li.textContent = p;
+      artEls.summaryText.appendChild(li);
+    }
+    return points.length > 0;
+  }
+
+  // Read-aloud needs the plain words back (the TTS splitter also relies on
+  // sentences ending in ./!/?/…, not on the bullet marks).
+  function summarySpeech() {
+    return Array.from(artEls.summaryText.children)
+      .map((li) => (li.textContent || "").trim().replace(/[.!?…]?$/, "."))
+      .join(" ");
+  }
+
   function renderArticleHeader(item) {
     document.title = item.title + " - News24";
     artEls.cat.textContent = item.cat || "Tin tức";
@@ -997,11 +1083,11 @@
       // when it arrives (or instantly from the 7-day cache on repeat views).
       const extractive = extractSummary(item);
       artState.extractive = extractive;
-      artEls.summaryText.textContent = extractive;
+      renderSummary(extractive);
       artEls.summary.hidden = !extractive;
       const ai = loadAiSummary(item.link);
       if (ai) {
-        artEls.summaryText.textContent = ai;
+        renderSummary(ai);
         artEls.sumAiBtn.textContent = "↺ Bản rút trích";
         artEls.sumAiBtn.disabled = false;
         artEls.sumAiBtn.classList.remove("busy");
@@ -1417,7 +1503,7 @@
       const text = await aiSummarize();
       saveAiSummary(link, text); // cache even if the user navigated away
       if (artState.link === link) {
-        artEls.summaryText.textContent = text;
+        renderSummary(text);
         artEls.sumAiBtn.textContent = "↺ Bản rút trích";
       }
     } catch (e) {
@@ -1441,14 +1527,14 @@
     if (!link) return;
     if (artEls.sumAiBtn.textContent.includes("rút trích")) {
       // AI text is showing: toggle back to the offline extractive version
-      artEls.summaryText.textContent = artState.extractive || "";
+      renderSummary(artState.extractive || "");
       artEls.sumAiBtn.textContent = "✨ Tóm tắt bằng AI";
       return;
     }
     const cached = loadAiSummary(link);
     if (cached) {
       // previously generated, just not showing (user toggled back)
-      artEls.summaryText.textContent = cached;
+      renderSummary(cached);
       artEls.sumAiBtn.textContent = "↺ Bản rút trích";
       return;
     }
@@ -1845,7 +1931,7 @@
       stopTts();
       return;
     }
-    const text = (artEls.summaryText.textContent || "").trim();
+    const text = summarySpeech();
     if (!text) return;
     tts.playing = true;
     artEls.ttsBtn.textContent = "⏹ Dừng đọc";
@@ -1977,9 +2063,22 @@
   // ------------------------------------------------------------------
   // Boot
   // ------------------------------------------------------------------
+  // The stats view lives in 404.html (and stats.html on hosts that serve
+  // it). GitHub Pages answers /news/stats with 404.html, so the app has to
+  // recognise the URL and let the markup/js/stats.js take over.
+  function isStatsPage() {
+    return /^\/(?:[\w.-]+\/)*stats(?:\.html?)?\/?$/.test(decodeURI(location.pathname));
+  }
+
   function boot() {
     renderToday();
     setInterval(renderToday, 60000);
+    if (isStatsPage()) {
+      showView("stats");
+      document.title = "Thống kê tin tức - News24";
+      loadSidebar();
+      return;
+    }
     const slug = currentSlug();
     if (slug) {
       // /news/<slug>.html - this page was served by the root 404.html

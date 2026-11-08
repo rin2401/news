@@ -20,6 +20,8 @@ browser.
   proxies as fallback, sanitized to a tag whitelist (scripts/styles/trackers
   stripped, lazy images resolved from `data-src`) and cached in memory
 - Live search, "load more" paging, relative timestamps ("2 giờ trước")
+- **[Thống kê](stats.html)**: số bài theo chủ đề / theo ngày, đọc thẳng từ
+  các snapshot RSS trong `data/`
 - **Summary box** under each article: an offline extractive summary paints
   instantly, then an AI summary swaps in when it arrives (cached 7 days)
 - **Read the summary aloud** via Google Translate TTS, with a reading-speed
@@ -27,6 +29,37 @@ browser.
 - Dark mode toggle (persisted; respects `prefers-color-scheme`)
 - 10-minute `localStorage` cache for instant navigation + offline fallback
 - No build step, no dependencies — plain HTML/CSS/JS
+
+## Thống kê
+
+[`stats.html`](stats.html) (nav *Thống kê*) answers "bao nhiêu bài, chủ đề
+nào, ngày nào": số bài theo chủ đề, số bài theo ngày, số bài theo giờ, biểu đồ
+cột xếp chồng chủ đề × ngày, và bảng chủ đề × ngày. Thuần HTML/CSS/JS tự vẽ,
+không thư viện, không file dữ liệu riêng.
+
+Trang đọc đúng những tệp mà trang chủ đang dùng — `data/<chuyên mục>.json` —
+rồi gộp lại:
+
+- Mỗi bài được tính **một lần**, dù nó nằm ở nhiều chuyên mục.
+- Feed tổng `tin-moi-nhat` được đọc **sau cùng**, nên bài nào cũng giữ đúng
+  chuyên mục thật; bài chỉ có ở feed tổng rơi vào "Khác".
+- "Cập nhật" là `fetchedAt` mới nhất trong các tệp đó.
+
+Đánh đổi: RSS chỉ giữ ~60 tin gần nhất mỗi chuyên mục, nên trang phản ánh
+**cửa sổ vài ngày gần nhất** (hiện ~9 ngày, ~600 bài), không phải toàn bộ lịch
+sử. Muốn có chuỗi dài hơn thì phải lưu mẫu ở server (một file lịch sử do
+workflow ghi thêm) — cố ý không làm, để repo không phải mang thêm dữ liệu.
+
+Lưu ý khi đọc biểu đồ giờ: VnExpress đánh dấu `00:00` cho bài không rõ giờ
+đăng, nên cột 0 giờ luôn cao bất thường (~6 % số bài).
+
+GitHub Pages phục vụ `/news/stats` bằng `404.html`; phần markup thống kê nằm
+trong `#viewStats` ở đó và trong `stats.html` (cùng một nội dung). Kiểm tra
+hai bản có khớp nhau không:
+
+```bash
+node scripts/check-stats-view.mjs
+```
 
 ## Read aloud (TTS)
 
@@ -97,7 +130,8 @@ stays on screen and the button offers a retry.
 `data/<slug>.json` files written by `scripts/fetch-rss.mjs`, which a
 GitHub Action (`.github/workflows/fetch-rss.yml`) runs every 30 minutes
 with a browser User-Agent (VnExpress blocks bot UAs). No CORS, no
-third-party rate limits, survives public-proxy outages.
+third-party rate limits, survives public-proxy outages. The stats page
+reads exactly these files — there is no separate history dataset.
 
 The **"Làm mới"** button and any missing snapshot fall back to a chain of
 public CORS proxies in the browser:
@@ -176,8 +210,10 @@ printf '%s\n' \
 
 ```
 index.html    # layout + categories
+stats.html    # trang thống kê (số bài theo chủ đề / theo ngày)
 css/style.css # VnExpress-inspired theme (light + dark)
 js/app.js     # RSS fetching, proxy fallback, caching, rendering
+js/stats.js   # thống kê từ data/<slug>.json, tự vẽ biểu đồ
 favicon.svg
 ```
 

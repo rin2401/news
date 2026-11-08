@@ -9,11 +9,23 @@
   <!-- Google Translate TTS (read-aloud) 404s any request carrying a
        Referer; audio playback needs this page-wide suppression -->
   <meta name="referrer" content="no-referrer">
+  <!-- Pin the saved theme before first paint: script requests are chained
+       through app.js, so the swap to the stored theme used to flash. Inline
+       on purpose - an external file would only add a round trip. -->
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("news24:theme") ||
+          (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+        document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    })();
+  </script>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=19">
+  <link rel="stylesheet" href="css/style.css?v=22">
 </head>
 <body>
   <!-- Top header -->
@@ -54,6 +66,7 @@
       <a class="nav-link" data-slug="giao-duc">Giáo dục</a>
       <a class="nav-link" data-slug="du-lich">Du lịch</a>
       <a class="nav-link" data-slug="phap-luat">Pháp luật</a>
+      <a class="nav-link nav-link--stats" href="stats.html">Thống kê</a>
       <button class="refresh-btn" id="refreshBtn" type="button" title="Làm mới tin">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A8 8 0 1 0 19.73 14h-2.08a6 6 0 1 1-1.41-6.24L13 11h7V4l-2.35 2.35z"/></svg>
         Làm mới
@@ -104,7 +117,7 @@
             <button class="sum-ai-btn" id="sumAiBtn" type="button">✨ Tóm tắt bằng AI</button>
           </div>
         </div>
-        <p id="artSummaryText"></p>
+        <ul id="artSummaryText" class="art-summary-list"></ul>
       </div>
       <a class="reader-full-btn" id="artFullBtn" target="_blank" rel="noopener">
         Đọc bản đầy đủ trên VnExpress ↗</a>
@@ -121,6 +134,112 @@
         <p class="reader-source">Nội dung thuộc bản quyền VnExpress —
           <a id="artOrigin2" target="_blank" rel="noopener">xem bản gốc</a></p>
       </footer>
+    </section>
+
+    <!-- Stats view: rendered for /stats URLs (GitHub Pages serves
+         404.html for them) and used as-is by stats.html on hosts that
+         serve that file. Kept in sync by scripts/check-stats-view.mjs;
+         all behaviour lives in js/stats.js. -->
+    <section class="main-col" id="viewStats" hidden>
+      <div class="col-header">
+        <h1 class="col-title">Thống kê tin tức</h1>
+        <span class="col-meta" id="kpiUpdated"></span>
+      </div>
+      <p class="stats-lead">
+        Số liệu đọc trực tiếp từ chính nguồn RSS của trang (<code>data/&lt;chuyên mục&gt;.json</code>).
+        Mỗi bài được tính <strong>một lần</strong>, dù nó xuất hiện ở nhiều chuyên mục.
+      </p>
+
+      <div id="statsMsg" class="status-bar stats-msg" role="status" hidden></div>
+
+      <!-- Skeleton shown until the feed snapshots have been read -->
+      <div id="statsSkeleton" class="stats-skeleton" aria-hidden="true">
+        <div class="sk-kpis">
+          <div class="sk-kpi"></div><div class="sk-kpi"></div>
+          <div class="sk-kpi"></div><div class="sk-kpi"></div>
+        </div>
+        <div class="sk-block"></div>
+        <div class="sk-block sk-block--tall"></div>
+      </div>
+
+      <div id="statsContent" hidden>
+        <h2 class="sr-only">Các chỉ số chính</h2>
+        <div class="kpis" id="kpis"></div>
+
+        <!-- Filters -->
+        <div class="stats-toolbar">
+          <div class="stats-ctl">
+            <span class="stats-ctl-label" id="rangeLabel">Khoảng thời gian</span>
+            <div class="seg" id="rangeSeg" role="group" aria-labelledby="rangeLabel">
+              <button class="seg-btn" type="button" data-range="7" aria-pressed="false">7 ngày</button>
+              <button class="seg-btn" type="button" data-range="14" aria-pressed="false">14 ngày</button>
+              <button class="seg-btn" type="button" data-range="30" aria-pressed="true">30 ngày</button>
+              <button class="seg-btn" type="button" data-range="all" aria-pressed="false">Tất cả</button>
+            </div>
+          </div>
+          <div class="stats-ctl stats-ctl--cats">
+            <span class="stats-ctl-label" id="catLabel">Chủ đề</span>
+            <div class="chips" id="catChips" role="group" aria-labelledby="catLabel"></div>
+          </div>
+        </div>
+        <p class="stats-note" id="rangeNote"></p>
+
+        <!-- a. Articles per category -->
+        <section class="stats-card" aria-labelledby="hCat">
+          <div class="stats-card-head">
+            <h2 class="stats-h2" id="hCat">Số bài theo chủ đề</h2>
+            <span class="stats-hint">Xếp theo số bài giảm dần</span>
+          </div>
+          <div id="catBars"></div>
+        </section>
+
+        <div class="stats-grid">
+          <!-- b. Articles per day -->
+          <section class="stats-card" aria-labelledby="hDay">
+            <div class="stats-card-head">
+              <h2 class="stats-h2" id="hDay">Số bài theo ngày</h2>
+              <span class="stats-hint" id="dayHint"></span>
+            </div>
+            <div id="dayCols"></div>
+          </section>
+
+          <!-- e. Articles per hour of the day -->
+          <section class="stats-card" aria-labelledby="hHour">
+            <div class="stats-card-head">
+              <h2 class="stats-h2" id="hHour">Số bài theo giờ</h2>
+              <span class="stats-hint" title="Một số bài được nguồn đánh dấu 00:00 khi không rõ giờ đăng, nên cột 0 giờ cao hơn thực tế">Giờ đăng gốc · bài ghi 00:00 khi nguồn không nêu giờ</span>
+            </div>
+            <div id="hourLine"></div>
+          </section>
+        </div>
+
+        <!-- c. Stacked bars: category mix per day -->
+        <section class="stats-card" aria-labelledby="hStack">
+          <div class="stats-card-head">
+            <h2 class="stats-h2" id="hStack">Cơ cấu chủ đề theo ngày</h2>
+            <span class="stats-hint" id="stackHint"></span>
+          </div>
+          <div class="legend" id="stackLegend"></div>
+          <div id="dayStack"></div>
+        </section>
+
+        <!-- d. Table: category x day -->
+        <section class="stats-card" aria-labelledby="hTable">
+          <div class="stats-card-head">
+            <h2 class="stats-h2" id="hTable">Chủ đề × ngày</h2>
+            <span class="stats-hint">Cuộn ngang để xem hết · nhấn tiêu đề cột để lọc</span>
+          </div>
+          <div class="stats-table-wrap" tabindex="0" role="region" aria-labelledby="hTable">
+            <table class="stats-table" id="catDayTable"></table>
+          </div>
+        </section>
+
+        <p class="stats-foot">
+          Con số là những gì nguồn RSS đang còn: mỗi chuyên mục chỉ giữ khoảng 60 tin gần nhất,
+          nên khoảng thời gian có dữ liệu sẽ ngắn với chuyên mục ít bài.
+        </p>
+      </div>
+
     </section>
 
     <!-- Sidebar. The "Tin được quan tâm" head and its list are siblings
@@ -140,6 +259,10 @@
       </div>
     </aside>
   </main>
+
+  <!-- Chart tooltip: a direct <body> child, so the pointer leaving a mark
+       never crosses an ancestor that would hide it on mouseleave. -->
+  <div id="statsTip" class="stats-tip" hidden></div>
 
   <footer class="footer">
     <div class="container">
@@ -217,6 +340,8 @@
     </div>
   </template>
 
-  <script src="js/app.js?v=23"></script>
+  <script src="js/app.js?v=28"></script>
+  <!-- Stats charts. Self-guarding: no-ops when #viewStats is hidden -->
+  <script src="js/stats.js?v=5"></script>
 </body>
 </html>

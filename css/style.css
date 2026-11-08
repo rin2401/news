@@ -342,14 +342,16 @@ a:hover { color: var(--link-hover); }
 /* ============ Layout ============ */
 .layout {
   display: grid;
-  grid-template-columns: 1fr 320px;
+  /* minmax(0, …) so a wide child (the stats charts) can scroll or shrink
+     inside its column instead of stretching the whole page sideways. */
+  grid-template-columns: minmax(0, 1fr) 320px;
   gap: 24px;
   padding-top: 20px;
   padding-bottom: 40px;
 }
 
 @media (max-width: 1023px) {
-  .layout { grid-template-columns: 1fr; }
+  .layout { grid-template-columns: minmax(0, 1fr); }
 }
 
 .col-header {
@@ -1098,6 +1100,41 @@ body.modal-open { overflow: hidden; }
   color: var(--text);
 }
 
+/* Summary body: one line per key point. The AI/extractive text arrives as
+   a single run-on string ("- ý 1 - ý 2"), split by app.js into <li>s. */
+.art-summary-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14.5px;
+  line-height: 1.62;
+  color: var(--text);
+  /* never break "14-16%" / "16-17%" across two lines */
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.art-summary-list:empty { display: none; }
+
+.art-summary-list li {
+  position: relative;
+  margin: 0 0 8px;
+  padding-left: 15px;
+}
+
+.art-summary-list li:last-child { margin-bottom: 0; }
+
+.art-summary-list li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: .72em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--primary);
+}
+
 /* AI summary toggle + read-aloud buttons inside the summary box */
 .art-summary-label {
   display: flex;
@@ -1167,6 +1204,7 @@ body.modal-open { overflow: hidden; }
   .reader-origin { font-size: 12px; }
   .sum-ai-btn { min-height: 34px; padding: 6px 14px; font-size: 11.5px; }
   .art-summary-label { row-gap: 8px; }
+  .art-summary-list { font-size: 14px; line-height: 1.58; }
   .reader-full-btn { display: inline-flex; width: 100%; justify-content: center; }
 
   .back-link { min-height: 44px; display: inline-flex; align-items: center; }
@@ -1354,4 +1392,805 @@ body.modal-open { overflow: hidden; }
   .ai-cfg-foot { flex-direction: column-reverse; align-items: stretch; }
   .ai-cfg-foot-right { display: grid; grid-template-columns: 1fr 1fr; }
   .ai-cfg-reset, .ai-cfg-save, .ai-cfg-foot-right .sum-ai-btn { min-height: 40px; }
+}
+
+/* ============ Stats page ============ */
+/* Everything below is stats.html only: KPIs, hand-drawn charts and the
+   category x day table. Chart series colours are mixed from --text over
+   --surface (see js/stats.js), so the same rules paint light and dark. */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.stats-page {
+  padding-top: 20px;
+  padding-bottom: 40px;
+  /* A grid item defaults to min-width: auto, which lets the wide charts
+     stretch it (and the page) instead of fitting the column. */
+  min-width: 0;
+}
+
+.stats-lead {
+  margin: 10px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-2);
+}
+
+.stats-lead code,
+.stats-foot code {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.stats-msg { margin: 14px 0 0; }
+
+.stats-msg .msg-text { display: inline; }
+
+.stats-msg .msg-cta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-top: 10px;
+}
+
+.msg-back {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.msg-back:hover { text-decoration: underline; }
+
+.stats-retry {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--primary);
+  border: 1px solid var(--primary);
+  border-radius: 999px;
+  padding: 5px 14px;
+  cursor: pointer;
+  vertical-align: middle;
+  min-height: 32px;
+}
+
+.stats-retry:hover { background: var(--primary-dark); border-color: var(--primary-dark); }
+
+/* ---------- Skeleton (until history.json lands) ---------- */
+.stats-skeleton { padding-top: 4px; }
+
+.sk-kpis {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.sk-kpi {
+  height: 84px;
+  border-radius: 10px;
+  background: var(--skeleton);
+}
+
+.sk-block {
+  height: 180px;
+  border-radius: 10px;
+  background: var(--skeleton);
+  margin-bottom: 14px;
+}
+
+.sk-block--tall { height: 240px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .sk-kpi,
+  .sk-block { animation: stats-sk-pulse 1.4s ease-in-out infinite; }
+}
+
+@keyframes stats-sk-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .55; }
+}
+
+/* ---------- KPI cards ---------- */
+.kpis {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  margin: 16px 0 20px;
+}
+
+.kpi {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px 14px;
+  box-shadow: var(--shadow);
+  min-width: 0;
+}
+
+.kpi-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: .3px;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.kpi-value {
+  font-family: var(--font-title);
+  font-size: 28px;
+  font-weight: 900;
+  line-height: 1.15;
+  margin: 6px 0 2px;
+  color: var(--primary);
+  overflow-wrap: anywhere;
+}
+
+.kpi-value--sm { font-size: 20px; color: var(--text); }
+
+.kpi-sub { font-size: 12px; color: var(--text-2); }
+
+/* ---------- Toolbar: range toggle + category chips ---------- */
+.stats-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--border);
+}
+
+.stats-ctl {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.stats-ctl-label {
+  font-size: 11.5px;
+  font-weight: 900;
+  letter-spacing: .4px;
+  text-transform: uppercase;
+  color: var(--text-2);
+  flex: 0 0 100%;
+}
+
+.seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px;
+  max-width: 100%;
+}
+
+.seg-btn {
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 6px 12px;
+  min-height: 34px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color .12s, background .12s;
+}
+
+.seg-btn:hover { color: var(--primary); }
+
+.seg-btn.is-active {
+  color: #fff;
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* Chips whose count is 0 in the current range stay clickable, dimmed. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 11px;
+  min-height: 32px;
+  cursor: pointer;
+  transition: color .12s, border-color .12s, background .12s;
+}
+
+.chip:hover { color: var(--primary); border-color: var(--primary); }
+
+.chip.is-on {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 9%, transparent);
+}
+
+.chip.is-empty { opacity: .55; }
+
+.chip-n {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-2);
+  background: var(--bg);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+
+.chip.is-on .chip-n { color: var(--primary); }
+
+.chip--reset {
+  border-style: dashed;
+  color: var(--text);
+}
+
+.stats-note {
+  margin: 12px 0 0;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+.stats-note.is-filtered { color: var(--primary); font-weight: 600; }
+
+/* ---------- Cards ---------- */
+.stats-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  padding: 14px;
+  margin-top: 16px;
+  min-width: 0;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+.stats-grid .stats-card { margin-top: 16px; }
+
+.stats-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+  margin-bottom: 12px;
+}
+
+.stats-h2 {
+  font-family: var(--font-title);
+  font-size: 16px;
+  font-weight: 900;
+  margin: 0;
+  color: var(--text);
+}
+
+.stats-h2::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 15px;
+  background: var(--primary);
+  border-radius: 2px;
+  margin-right: 8px;
+  vertical-align: -1px;
+}
+
+.stats-hint {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--text-2);
+  text-align: right;
+}
+
+.chart-foot {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-2);
+  text-align: center;
+}
+
+/* ---------- a. Horizontal bars ---------- */
+.hbars { display: flex; flex-direction: column; gap: 2px; }
+
+.hbar {
+  display: grid;
+  grid-template-columns: 84px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 4px;
+  border-radius: 6px;
+  min-height: 36px;
+  color: var(--text);
+}
+
+.hbar:hover,
+.hbar:focus-visible {
+  background: var(--bg);
+  color: var(--primary);
+  outline: none;
+}
+
+.hbar:focus-visible { box-shadow: 0 0 0 2px var(--primary) inset; }
+
+.hbar-name {
+  font-size: 12.5px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hbar-track {
+  display: flex;
+  align-items: center;
+  height: 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.hbar-fill {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+  background: var(--primary);
+  border-radius: 999px;
+}
+
+.hbar:hover .hbar-fill { background: var(--primary-dark); }
+
+.hbar-val {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.hbar-val strong { font-size: 13px; }
+
+.hbar-pct { color: var(--text-2); font-size: 11px; }
+
+/* ---------- b/c. Column + stacked-column charts ---------- */
+.cols { --n: 7; }
+
+.cols-plot {
+  display: grid;
+  grid-template-columns: repeat(var(--n), minmax(0, 1fr));
+  gap: 2px;
+  align-items: end;
+  /* Axis labels spill sideways out of their slot; keep the outermost ones
+     ("10/10", "08/11") off the card border. */
+  padding: 0 12px;
+}
+
+.col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.col-val {
+  font-size: 10px;
+  line-height: 1.3;
+  height: 14px;
+  text-align: center;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+}
+
+.col-track {
+  position: relative;
+  height: 150px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  border-bottom: 1px solid var(--border);
+  background-image: linear-gradient(to top, var(--border) 1px, transparent 1px);
+  background-size: 100% 25%;
+  min-width: 0;
+}
+
+/* Columns are <button> so they are keyboard reachable: reset the UA look. */
+.col-bar {
+  display: block;
+  width: 100%;
+  max-width: 26px;
+  min-height: 3px;
+  padding: 0;
+  border: none;
+  border-radius: 3px 3px 0 0;
+  background: var(--primary);
+  cursor: pointer;
+  transition: background .12s, height .2s ease;
+}
+
+.col-bar:hover,
+.col-bar:focus-visible {
+  background: var(--primary-dark);
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.col-zero {
+  font-size: 12px;
+  color: var(--text-2);
+  padding-bottom: 1px;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 26px;
+  min-height: 3px;
+  border-radius: 3px 3px 0 0;
+  overflow: hidden;
+  transition: height .2s ease;
+}
+
+.stack-seg {
+  flex-basis: 0;
+  min-height: 2px;
+  outline: none;
+}
+
+.stack-seg:hover { filter: brightness(.88); }
+
+.stack-seg:focus-visible {
+  box-shadow: 0 0 0 2px var(--primary) inset;
+}
+
+.col-x {
+  height: 30px;
+  padding-top: 4px;
+  text-align: center;
+  font-size: 10px;
+  line-height: 1.2;
+  color: var(--text-2);
+  /* Labels are wider than one slot ("10/10" ~24px vs ~11px per column), so
+     let them spill sideways, centred on their column, instead of being cut
+     to "1(" by an overflow:hidden slot. Only every nth label is rendered, so
+     they do not collide. */
+  overflow: visible;
+  white-space: nowrap;
+}
+
+/* Narrow slots thin the axis: clipped halves of neighbouring labels would
+   read as "1(" instead of "10/10". First and last label are always kept. */
+.col-x:not(:first-child):not(:last-child) { overflow: hidden; visibility: visible; }
+
+@media (max-width: 639px) {
+  .cols-plot { gap: 0; }
+  .col-x { font-size: 9px; letter-spacing: -.2px; }
+  .col-x.is-blank { visibility: hidden; }
+}
+
+.day-link {
+  display: inline-block;
+  padding: 2px 1px;
+  color: inherit;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.day-link:hover,
+.day-link:focus-visible {
+  color: var(--primary);
+  text-decoration: underline;
+  outline: none;
+}
+
+/* ---------- e. Hour histogram ---------- */
+.hhist-cols {
+  display: grid;
+  grid-template-columns: repeat(24, minmax(0, 1fr));
+  gap: 1px;
+  align-items: end;
+}
+
+.hhist-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.hhist-hit {
+  position: relative;
+  height: 80px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  border-bottom: 1px solid var(--border);
+  outline: none;
+}
+
+.hhist-bar {
+  display: block;
+  width: 100%;
+  max-width: 14px;
+  min-height: 2px;
+  background: color-mix(in srgb, var(--primary) 65%, var(--surface));
+  border-radius: 2px 2px 0 0;
+  transition: height .2s ease;
+}
+
+.hhist-hit:hover .hhist-bar,
+.hhist-hit:focus-visible .hhist-bar { background: var(--primary); }
+
+.hhist-hit:focus-visible { box-shadow: 0 0 0 2px var(--primary) inset; border-radius: 2px; }
+
+.hhist-x {
+  height: 16px;
+  text-align: center;
+  font-size: 9px;
+  line-height: 1.6;
+  color: var(--text-2);
+  overflow: hidden;
+}
+
+/* ---------- c-legend ---------- */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-bottom: 12px;
+}
+
+.stats-card .legend:empty { display: none; }
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text);
+  min-width: 0;
+}
+
+.legend-sw {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.legend-n { color: var(--text-2); font-variant-numeric: tabular-nums; }
+
+/* ---------- d. Table ---------- */
+/* The only thing on the page allowed to scroll sideways; the wrapper
+   takes the tab stop so a keyboard reader can scroll it too. */
+.stats-table-wrap {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: none;
+}
+
+.stats-table-wrap:focus-visible { box-shadow: 0 0 0 2px var(--primary); }
+
+.stats-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-table caption { caption-side: top; }
+
+.stats-table th,
+.stats-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+  background: var(--surface);
+}
+
+.stats-table .num { text-align: right; }
+
+.stats-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  vertical-align: bottom;
+  padding: 4px 4px;
+}
+
+.stats-table .is-corner,
+.stats-table tbody th.sticky-col,
+.stats-table tfoot th.sticky-col {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 118px;
+  max-width: 150px;
+  border-right: 1px solid var(--border);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stats-table .is-corner {
+  z-index: 3;
+  left: 0;
+  min-width: 118px;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+  color: var(--text-2);
+  padding-left: 10px;
+}
+
+.stats-table .th-day {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 4px 6px;
+  min-height: 32px;
+  cursor: pointer;
+  width: 100%;
+}
+
+.stats-table .th-day:hover,
+.stats-table .th-day:focus-visible {
+  color: var(--primary);
+  border-color: var(--primary);
+  outline: none;
+}
+
+.th-wd { font-weight: 400; font-size: 10px; }
+
+.tbl-cat { color: var(--text); font-weight: 700; }
+
+.tbl-cat:hover { color: var(--primary); text-decoration: underline; }
+
+.stats-table td.is-zero { color: var(--text-2); opacity: .6; }
+
+.stats-table .is-total { font-weight: 700; }
+
+/* Faint zebra: at 360px only 3 day columns are visible at a time, and
+   without it a cell can read as belonging to the row above. */
+.stats-table tbody tr:nth-child(even) th,
+.stats-table tbody tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--bg) 55%, var(--surface));
+}
+
+/* Hover must be more opaque than the zebra mix below, or the two just
+   trade places and the row under the cursor looks "selected". */
+.stats-table tbody tr:hover td,
+.stats-table tbody tr:hover th {
+  background: color-mix(in srgb, var(--text) 8%, var(--surface));
+}
+
+.stats-table tfoot td,
+.stats-table tfoot th {
+  background: var(--bg);
+  font-weight: 700;
+  border-bottom: none;
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+}
+
+.stats-table tfoot th.sticky-col { z-index: 2; }
+
+.stats-foot {
+  margin: 18px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-2);
+}
+
+/* ---------- Tooltip ---------- */
+.stats-tip {
+  position: absolute;
+  z-index: 60;
+  max-width: 240px;
+  padding: 6px 9px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: #fff;
+  background: rgba(28, 28, 31, .94);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .25);
+  pointer-events: none;
+}
+
+[data-theme="dark"] .stats-tip { background: rgba(240, 240, 245, .95); color: #1c1c1f; }
+
+.stats-tip[hidden] { display: none; }
+
+/* ---------- Tablet / desktop ---------- */
+@media (min-width: 640px) {
+  .kpis,
+  .sk-kpis { grid-template-columns: repeat(4, 1fr); }
+  .stats-card { padding: 16px 18px; }
+  .hbar { grid-template-columns: 130px 1fr auto; }
+  .col-track { height: 190px; }
+  .hhist-hit { height: 110px; }
+  .col-x { font-size: 11px; }
+}
+
+@media (min-width: 900px) {
+  .stats-grid { grid-template-columns: 1.35fr 1fr; }
+}
+
+/* ---------- Motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .col-bar,
+  .stack,
+  .hhist-bar,
+  .seg-btn,
+  .chip { transition: none; }
+}
+
+/* ---- Stats view served inside 404.html (/stats on GitHub Pages) ----
+   There the charts sit in the main column of the shared layout, next to the
+   news sidebar, instead of a full-width <main>. js/stats.js adds
+   .stats-view to <html> as soon as it starts drawing. */
+html.stats-view .side-box--head,
+html.stats-view .side-list { display: none; }
+
+html.stats-view .stats-page {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+html.stats-view .stats-page > .col-header { margin-top: 0; }
+
+/* On phones the sidebar block would otherwise push the charts down. */
+@media (max-width: 1023px) {
+  html.stats-view .sidebar { display: none; }
 }

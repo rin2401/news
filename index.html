@@ -9,11 +9,23 @@
   <!-- Google Translate TTS (read-aloud) 404s any request carrying a
        Referer; audio playback needs this page-wide suppression -->
   <meta name="referrer" content="no-referrer">
+  <!-- Pin the saved theme before first paint: script requests are chained
+       through app.js, so the swap to the stored theme used to flash. Inline
+       on purpose - an external file would only add a round trip. -->
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("news24:theme") ||
+          (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+        document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    })();
+  </script>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=19">
+  <link rel="stylesheet" href="css/style.css?v=22">
 </head>
 <body>
   <!-- Top header -->
@@ -54,6 +66,7 @@
       <a class="nav-link" data-slug="giao-duc">Giáo dục</a>
       <a class="nav-link" data-slug="du-lich">Du lịch</a>
       <a class="nav-link" data-slug="phap-luat">Pháp luật</a>
+      <a class="nav-link nav-link--stats" href="stats.html">Thống kê</a>
       <button class="refresh-btn" id="refreshBtn" type="button" title="Làm mới tin">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A8 8 0 1 0 19.73 14h-2.08a6 6 0 1 1-1.41-6.24L13 11h7V4l-2.35 2.35z"/></svg>
         Làm mới
@@ -104,7 +117,7 @@
             <button class="sum-ai-btn" id="sumAiBtn" type="button">✨ Tóm tắt bằng AI</button>
           </div>
         </div>
-        <p id="artSummaryText"></p>
+        <ul id="artSummaryText" class="art-summary-list"></ul>
       </div>
       <a class="reader-full-btn" id="artFullBtn" target="_blank" rel="noopener">
         Đọc bản đầy đủ trên VnExpress ↗</a>
@@ -217,6 +230,6 @@
     </div>
   </template>
 
-  <script src="js/app.js?v=23"></script>
+  <script src="js/app.js?v=28"></script>
 </body>
 </html>
