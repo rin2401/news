@@ -2895,3 +2895,29 @@ html.chat-open .chat-fab { display: none; }
 .reader-body .rd-video-poster:hover figcaption {
   text-decoration: underline;
 }
+
+/* Posters are portrait (1080x1920) in this template, so the old rules that
+   forced them into a 16:9 cover box cropped away most of the frame. Let the
+   image keep its own shape inside a dark, height-capped stage. */
+.reader-body .rd-video-frame img {
+  object-fit: contain;
+}
+
+.reader-body .rd-video-frame {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: auto;
+  min-height: 0;
+  max-height: min(70vh, 520px);
+  background: #0d0d0f;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.reader-body .rd-video-frame img {
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: min(70vh, 520px);
+}

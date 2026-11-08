@@ -2251,7 +2251,7 @@
   // Bumped when the sanitiser's output shape changes, so a reader who has
   // the old markup cached (e.g. bodies from before videos were kept) does not
   // keep being served it for 24h. 2 = inline videos are preserved.
-  const ARTICLE_HTML_VERSION = 2;
+  const ARTICLE_HTML_VERSION = 3;
 
   function saveArticleHtml(link, html) {
     try {
