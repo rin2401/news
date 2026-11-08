@@ -986,8 +986,10 @@
     rootClone.querySelectorAll("*").forEach((el) => {
       if (el.tagName === "IMG" || el.tagName === "A") return; // handled above
       if (el.classList && /(^|\s)rd-video(-poster|-frame|-play|-badge)?(\s|$)/.test(el.className)) {
+        // Our own markup: keep `class` plus data-* (data-hls holds the
+        // playlist the player needs, data-wired guards double-binding).
         [...el.attributes].forEach((a) => {
-          if (a.name !== "class") el.removeAttribute(a.name);
+          if (a.name !== "class" && !a.name.startsWith("data-")) el.removeAttribute(a.name);
         });
         return;
       }
@@ -1055,13 +1057,19 @@
   // VnExpress ships clips as an adaptive HLS playlist (master.m3u8) from
   // d1.vnecdn.net, and that host enforces hotlink protection: it answers
   // 406/407 unless Referer is vnexpress.net, which a browser cannot set.
-  // Verified in Chrome - native <video> fails with DEMUXER_ERROR, hls.js
-  // with manifestLoadError - so a clip cannot be played from this origin at
-  // all. X-Frame-Options/CSP block embedding the article too.
+  // Native <video> fails with DEMUXER_ERROR and hls.js with
+  // manifestLoadError, so a clip cannot be played from this origin directly.
+  // X-Frame-Options/CSP block embedding the article too.
   //
-  // So each clip renders as its still frame with a play overlay, and both
-  // open the clip on VnExpress, where it plays normally. That keeps the
-  // story's visuals and order instead of silently dropping the media.
+  // Playback goes through our own CORS Worker (see VIDEO_PROXY below), which
+  // re-issues the request server-side with the Referer the CDN wants. Every
+  // playlist, key and segment hop is routed through it, so the player never
+  // touches d1.vnecdn.net itself.
+  //
+  // The card is still a link: clicking the poster opens the clip on
+  // VnExpress, and the play button loads the in-page player instead. If the
+  // worker is unreachable the card degrades to a plain link, which is why
+  // the poster and href are built first and the player is layered on top.
   //
   // The markup is a 4-level nest, and the player wrapper is display:none
   // until VnExpress's own JS builds a player inside it:
@@ -1215,10 +1223,165 @@
     });
   }
 
-  // The clip is a poster + link now (the CDN blocks playback from this
-  // origin), so there is nothing to attach. Kept as a no-op seam: a
-  // self-hosted/proxied deployment can restore a real player here.
-  function attachHlsPlayer() {}
+  // ---- proxied playback ------------------------------------------------
+  // Our CORS Worker: it re-issues each request with Referer: vnexpress.net,
+  // which is the one thing the browser refuses to do itself. The worker
+  // merges whatever we put in x-cors-headers into the upstream request.
+  const VIDEO_PROXY = "https://cors.rin2401.workers.dev/";
+  const VIDEO_PROXY_HEADERS = JSON.stringify({ Referer: "https://vnexpress.net/" });
+
+  const HLS_CDN = "https://cdn.jsdelivr.net/npm/hls.js@1.7.4/dist/hls.min.js";
+  const HLS_SRI =
+    "sha384-p9vgU/7IYJWd3I4STrtqxqR/2cAQlhIX7D/HrTnIMEjjcUox165b7se7sxmm3zDg";
+  // Safari plays HLS natively, but only if we point <video> at the playlist
+  // directly - and that request would not carry our Referer, so it is
+  // proxied too. MSE + hls.js is used everywhere else.
+  const NATIVE_HLS = !!document.createElement("video").canPlayType(
+    "application/vnd.apple.mpegurl"
+  );
+
+  let hlsLoading = null;
+
+  function loadHlsJs() {
+    if (window.Hls) return Promise.resolve(window.Hls);
+    if (hlsLoading) return hlsLoading;
+    hlsLoading = new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = HLS_CDN;
+      s.integrity = HLS_SRI;
+      s.crossOrigin = "anonymous";
+      s.onload = () => (window.Hls ? resolve(window.Hls) : reject(new Error("no Hls")));
+      s.onerror = () => reject(new Error("hls.js failed to load"));
+      document.head.appendChild(s);
+    }).catch((err) => {
+      hlsLoading = null; // allow a retry on the next open
+      throw err;
+    });
+    return hlsLoading;
+  }
+
+  const proxied = (url) => VIDEO_PROXY + url;
+
+  // hls.js's default loader is XhrLoader, and it opens the request itself
+  // before we get a say - xhrSetup is the seam where we can redirect it. Every
+  // playlist, segment and key goes through the worker, which re-issues it with
+  // the Referer the CDN requires. (Verified: 4 renditions parsed, duration
+  // 82s, readyState 4.)
+  function xhrSetup(xhr, url) {
+    xhr.open("GET", proxied(url), true);
+    xhr.setRequestHeader("x-cors-headers", VIDEO_PROXY_HEADERS);
+  }
+
+  function buildPlayer(block, hlsUrl, poster, caption) {
+    const video = document.createElement("video");
+    video.className = "rd-video-el";
+    video.controls = true;
+    video.playsInline = true;
+    video.preload = "metadata";
+    video.setAttribute("playsinline", "");
+    if (isTrustedImageUrl(poster)) video.poster = poster;
+    if (caption) video.setAttribute("aria-label", caption);
+
+    let hls = null;
+    let failed = false;
+
+    const fail = (why) => {
+      if (failed) return;
+      failed = true;
+      if (hls) {
+        try {
+          hls.destroy();
+        } catch (e) {}
+      }
+      block.classList.add("rd-video--failed");
+      const msg = document.createElement("p");
+      msg.className = "rd-video-error";
+      msg.textContent =
+        "Không phát được video ở đây. Mở trên VnExpress để xem. (" + why + ")";
+      block.appendChild(msg);
+    };
+
+    // Some renditions are AES-128 encrypted; hls.js handles that, but a
+    // failed key fetch surfaces as a fatal error we should report plainly.
+    const start = () => {
+      video.controls = true;
+      const p = video.play();
+      if (p && p.catch) p.catch(() => {}); // autoplay may be blocked; fine
+    };
+
+    if (NATIVE_HLS) {
+      video.src = proxied(hlsUrl);
+      video.addEventListener("error", () => fail("lỗi tải video"), { once: true });
+      start();
+    } else {
+      loadHlsJs()
+        .then((Hls) => {
+          if (!Hls.isSupported()) return fail("trình duyệt không hỗ trợ");
+          hls = new Hls({
+            xhrSetup,
+            enableWorker: true,
+            lowLatencyMode: false,
+            maxBufferLength: 30,
+          });
+          hls.on(Hls.Events.ERROR, (_e, data) => {
+            if (!data.fatal) return;
+            if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+              fail("lỗi mạng");
+            } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+              try {
+                hls.recoverMediaError();
+              } catch (err) {
+                fail("lỗi giải mã");
+              }
+            } else {
+              fail("không phát được");
+            }
+          });
+          hls.loadSource(hlsUrl);
+          hls.attachMedia(video);
+          hls.on(Hls.Events.MANIFEST_PARSED, start);
+        })
+        .catch(() => fail("không tải được trình phát"));
+    }
+
+    block.classList.add("rd-video--playing");
+    block.appendChild(video);
+    video.focus({ preventScroll: true });
+  }
+
+  // Wire the play button on every lifted clip. The card keeps working as a
+  // link: only an explicit press on the play control swaps in the player, so
+  // a reader who just wants to read the story is never surprised by media
+  // starting on its own.
+  function attachHlsPlayer(root) {
+    root.querySelectorAll("figure.rd-video").forEach((block) => {
+      const hlsUrl = block.dataset.hls;
+      if (!hlsUrl || block.dataset.wired === "1") return;
+      block.dataset.wired = "1";
+
+      const play = block.querySelector(".rd-video-play");
+      if (!play) return;
+      play.setAttribute("role", "button");
+      play.setAttribute("tabindex", "0");
+      play.setAttribute("aria-label", "Phát video");
+
+      const open = (event) => {
+        if (event) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+        if (block.classList.contains("rd-video--playing")) return;
+        const img = block.querySelector(".rd-video-frame img");
+        const cap = block.querySelector("figcaption");
+        buildPlayer(block, hlsUrl, img ? img.src : "", cap ? cap.textContent : "");
+      };
+
+      play.addEventListener("click", open);
+      play.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") open(e);
+      });
+    });
+  }
 
   function urlBasename(u) {
     try {
@@ -2255,7 +2418,7 @@
   // Bumped when the sanitiser's output shape changes, so a reader who has
   // the old markup cached (e.g. bodies from before videos were kept) does not
   // keep being served it for 24h. 2 = inline videos are preserved.
-  const ARTICLE_HTML_VERSION = 4;
+  const ARTICLE_HTML_VERSION = 5;
 
   function saveArticleHtml(link, html) {
     try {

@@ -2921,3 +2921,45 @@ html.chat-open .chat-fab { display: none; }
   height: auto;
   max-height: min(70vh, 520px);
 }
+
+/* ---- in-page clip player ------------------------------------------------
+   The play ring is now a real control: pressing it swaps the poster for a
+   proxied <video>. Everything here is additive so it cannot disturb the
+   poster card that readers see before pressing play. */
+.reader-body .rd-video-play {
+  cursor: pointer;
+}
+
+.reader-body .rd-video--playing {
+  display: block;
+}
+
+.reader-body .rd-video--playing .rd-video-poster {
+  display: none;
+}
+
+.reader-body .rd-video-el {
+  display: block;
+  width: 100%;
+  max-height: min(70vh, 520px);
+  background: #000;
+  border-radius: 8px;
+}
+
+/* A failed clip falls back to plain text; keep the poster card clickable so
+   the reader can still reach VnExpress. */
+.reader-body .rd-video--failed .rd-video-poster {
+  display: block;
+}
+
+.reader-body .rd-video-error {
+  margin: 8px 0 0;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reader-body .rd-video-el {
+    scroll-behavior: auto;
+  }
+}
