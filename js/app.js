@@ -957,6 +957,11 @@
     rootClone.querySelectorAll("a").forEach((a) => {
       const href = decodeAmp(a.getAttribute("href") || "");
       const external = a.dataset.external === "1";
+      // Our own video link carries .rd-video-poster, and that class is how
+      // the player hides the poster once playback starts. This pass wipes
+      // every attribute, so remember it and put it back - without it the
+      // 550px poster stayed on screen above the video.
+      const ownClass = external ? a.getAttribute("class") || "" : "";
       [...a.attributes].forEach((x) => a.removeAttribute(x.name));
       // Our own "watch the clip" link always leaves the site: the video only
       // plays on VnExpress, so rewriting it to the internal slug page would
@@ -965,6 +970,7 @@
         a.setAttribute("href", href);
         a.setAttribute("target", "_blank");
         a.setAttribute("rel", "noopener");
+        if (ownClass) a.setAttribute("class", ownClass);
         return;
       }
       const slug = relativeSlug(href);
@@ -2424,7 +2430,7 @@
   // Bumped when the sanitiser's output shape changes, so a reader who has
   // the old markup cached (e.g. bodies from before videos were kept) does not
   // keep being served it for 24h. 2 = inline videos are preserved.
-  const ARTICLE_HTML_VERSION = 5;
+  const ARTICLE_HTML_VERSION = 6;
 
   function saveArticleHtml(link, html) {
     try {
