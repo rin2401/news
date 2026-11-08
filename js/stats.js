@@ -388,7 +388,12 @@
   function renderKpis(items) {
     els.kpis.innerHTML = "";
     const total = items.length;
-    const nCats = Object.keys(countBy(items, (it) => it.slug)).length;
+    // "Khác" is a fallback bucket for aggregate-feed leftovers, not a topic
+    // of the site: keep it out of both sides of the ratio.
+    const realCats = state.data.order.filter((slug) => slug !== "khac");
+    const nCats = realCats.filter((slug) =>
+      items.some((it) => it.slug === slug)
+    ).length;
     const days = state.data.days;
     const first = days.length ? days[0].key : "";
     const last = days.length ? days[days.length - 1].key : "";
@@ -401,7 +406,7 @@
       },
       {
         label: "Số chủ đề",
-        value: nCats + "/" + (state.data.order.length - 1),
+        value: nCats + "/" + realCats.length,
         sub: "có bài trong kỳ",
       },
       {
@@ -440,17 +445,16 @@
     });
     const n = meta.length;
     if (!n) return [];
-    const step = Math.max(1, Math.ceil(n / (narrow ? 5 : MAX_LABELS)));
-    const out = meta.map((m, i) => (i % step === 0 ? m.short : ""));
-    out[0] = meta[0].short;
-    // The last day is always labelled and labels spill sideways out of their
-    // narrow slot, so whichever label sits just before it would collide.
-    for (let i = n - 2; i >= 0; i--) {
-      if (out[i]) {
-        out[i] = "";
-        break;
-      }
-    }
+    // Labels spill sideways out of their slot (see .col-x), so neighbours
+    // closer than 2 slots would collide. Pick the widest spacing that fits
+    // the budget, then always keep the first and last day - nudging the last
+    // one left when it would land on its neighbour.
+    const budget = narrow ? 5 : MAX_LABELS;
+    const step = Math.max(1, Math.ceil((n - 1) / Math.max(1, budget - 1)));
+    const out = meta.map(() => "");
+    for (let i = 0; i < n; i += step) out[i] = meta[i].short;
+    // The last day is always labelled; drop the label it would sit on.
+    if (n > 1 && out[n - 2]) out[n - 2] = "";
     out[n - 1] = meta[n - 1].short;
     if (step === 1) {
       meta.forEach((m, i) => {
