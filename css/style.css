@@ -2868,3 +2868,15 @@ html.chat-open .chat-fab { display: none; }
     transform: none;
   }
 }
+
+/* The poster must always occupy space: without a reserved box the card
+   collapses to 0px while the image loads, so there is nothing to click. */
+.reader-body .rd-video-frame {
+  display: block;
+  min-height: 180px;
+  aspect-ratio: 16 / 9;
+}
+
+.reader-body .rd-video-frame img {
+  height: 100%;
+}

@@ -933,9 +933,18 @@
       );
       [...img.attributes].forEach((a) => img.removeAttribute(a.name));
       if (/^https?:\/\//i.test(real)) {
+        // A clip poster is the whole click target of its card, so it must
+        // load immediately: a lazy <img> has no intrinsic size until it
+        // scrolls into view, which collapsed the card to 0px - nothing to
+        // tap. Ordinary article photos stay lazy.
+        const eager = !!img.closest("figure.rd-video");
         img.setAttribute("src", real);
-        img.setAttribute("alt", "Ảnh minh họa");
-        img.setAttribute("loading", "lazy");
+        const cap = img.closest("figure.rd-video")?.querySelector("figcaption");
+        img.setAttribute(
+          "alt",
+          (cap && cap.textContent.trim()) || "Ảnh minh họa"
+        );
+        img.setAttribute("loading", eager ? "eager" : "lazy");
         img.setAttribute("referrerpolicy", "no-referrer");
         img.onerror = () => img.remove();
       } else {
@@ -1106,7 +1115,9 @@
       const img = document.createElement("img");
       img.src = poster;
       img.alt = caption || "Video";
-      img.loading = "lazy";
+      // NOT lazy: a lazy <img> has no intrinsic size until it scrolls into
+      // view, which collapsed the card to 0px and left nothing to click.
+      img.loading = "eager";
       img.decoding = "async";
       img.referrerPolicy = "no-referrer";
       img.onerror = () => {
