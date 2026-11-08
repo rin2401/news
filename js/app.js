@@ -1233,12 +1233,18 @@
   const HLS_CDN = "https://cdn.jsdelivr.net/npm/hls.js@1.7.4/dist/hls.min.js";
   const HLS_SRI =
     "sha384-p9vgU/7IYJWd3I4STrtqxqR/2cAQlhIX7D/HrTnIMEjjcUox165b7se7sxmm3zDg";
-  // Safari plays HLS natively, but only if we point <video> at the playlist
-  // directly - and that request would not carry our Referer, so it is
-  // proxied too. MSE + hls.js is used everywhere else.
-  const NATIVE_HLS = !!document.createElement("video").canPlayType(
-    "application/vnd.apple.mpegurl"
-  );
+  // Only Safari plays HLS without MSE. canPlayType is not a usable test:
+  // Chrome answers "maybe" for application/vnd.apple.mpegurl but cannot
+  // actually play it, so every Chrome reader got a dead <video> with
+  // MEDIA_ERR_SRC_NOT_SUPPORTED. Gate on the engine instead - Safari is the
+  // only one with the native pipeline, and it still reports itself via
+  // vendor or the absence of Chrome/Firefox markers.
+  const IS_SAFARI =
+    typeof window.webkitConvertPointFromNodeToPage === "function" ||
+    /^((?!chrome|android|crios|fxios|edgios).)*safari/i.test(navigator.userAgent);
+  const NATIVE_HLS =
+    IS_SAFARI &&
+    !!document.createElement("video").canPlayType("application/vnd.apple.mpegurl");
 
   let hlsLoading = null;
 
