@@ -1349,8 +1349,22 @@
     await runTopicTurn(text, items, historyFor(ctx.key));
   }
 
+  // History handed to a model. The "[…]" entries are UI bookkeeping — they
+  // say how many results a past search showed — so replaying them would
+  // teach the model to answer with the same bracket text instead of doing
+  // the search. They are dropped here and replaced by a plain description
+  // of what happened, which keeps the turn count stable.
   function historyFor(key) {
-    return (threads.get(key) || []).slice(-MAX_TURNS);
+    return (threads.get(key) || [])
+      .map((m) => {
+        if (m.role !== "assistant") return m;
+        const c = String(m.content || "");
+        if (c.charAt(0) !== "[") return m;
+        return c.indexOf("đã tìm") === 0
+          ? { role: "assistant", content: "(đã tìm trong kho tin)" }
+          : { role: "assistant", content: "(không có kết quả trong kho tin)" };
+      })
+      .slice(-MAX_TURNS);
   }
 
   async function sendCurrent() {

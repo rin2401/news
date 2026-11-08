@@ -909,10 +909,14 @@
     liftVideos(rootClone, articleUrl);
 
     // The blocks liftVideos() just built are ours, not VnExpress's junk boxes
-    // (.box_embed_video matches "[class*='box_']"), so they are exempt.
-    const own = (n) => n.closest("figure.rd-video");
+    // (.box_embed_video / .box_embed_video_parent match "[class*='box_']"),
+    // so anything inside one is exempt. Checked downwards too: the wrap div
+    // that matches the selector is an ANCESTOR of our figure, so closest()
+    // alone would still drop the clip.
+    const isOwn = (n) =>
+      !!(n.closest("figure.rd-video") || n.querySelector("figure.rd-video"));
     rootClone.querySelectorAll(STRIP_SELECTOR).forEach((n) => {
-      if (!own(n)) n.remove();
+      if (!isOwn(n)) n.remove();
     });
 
     // unwrap <picture> so one plain <img> survives
@@ -943,7 +947,17 @@
     // readers stay on-site; anything else http(s) opens off-site
     rootClone.querySelectorAll("a").forEach((a) => {
       const href = decodeAmp(a.getAttribute("href") || "");
+      const external = a.dataset.external === "1";
       [...a.attributes].forEach((x) => a.removeAttribute(x.name));
+      // Our own "watch the clip" link always leaves the site: the video only
+      // plays on VnExpress, so rewriting it to the internal slug page would
+      // just bring the reader back to this same article.
+      if (external && /^https?:\/\//i.test(href)) {
+        a.setAttribute("href", href);
+        a.setAttribute("target", "_blank");
+        a.setAttribute("rel", "noopener");
+        return;
+      }
       const slug = relativeSlug(href);
       if (/^https:\/\/vnexpress\.net\//i.test(href) && slug !== href) {
         a.setAttribute("href", slug); // internal article page, same tab
@@ -962,15 +976,7 @@
     // push the figcaption hundreds of pixels below its image.
     rootClone.querySelectorAll("*").forEach((el) => {
       if (el.tagName === "IMG" || el.tagName === "A") return; // handled above
-      // our own video blocks: keep the player's attributes (controls,
-      // preload, poster, src). Everything else is rebuilt below.
-      if (el.tagName === "VIDEO") {
-        [...el.attributes].forEach((a) => {
-          if (!VIDEO_KEEP_ATTRS.has(a.name)) el.removeAttribute(a.name);
-        });
-        return;
-      }
-      if (el.classList && el.classList.contains("rd-video")) {
+      if (el.classList && /(^|\s)rd-video(-poster|-frame|-play|-badge)?(\s|$)/.test(el.className)) {
         [...el.attributes].forEach((a) => {
           if (a.name !== "class") el.removeAttribute(a.name);
         });
@@ -979,15 +985,23 @@
       [...el.attributes].forEach((a) => el.removeAttribute(a.name));
     });
 
-    // figures that lost their media are stray captions - drop them
+    // figures that lost their media are stray captions - drop them.
+    // A figure that CONTAINS one of our blocks (VnExpress nests the clip in
+    // an outer tplCaption/item_slide_show figure) must survive, or removing
+    // it takes the clip down with it.
     rootClone.querySelectorAll("figure").forEach((f) => {
-      if (!f.querySelector("img") && !f.querySelector("video")) f.remove();
+      const hasMedia =
+        f.querySelector("img") ||
+        f.querySelector("video") ||
+        f.classList.contains("rd-video") ||
+        f.querySelector("figure.rd-video");
+      if (!hasMedia) f.remove();
     });
 
     const out = document.createElement("div");
     [...rootClone.children].forEach((child) => {
       if (ALLOWED_TOP.has(child.tagName)) {
-        const hasMedia = child.querySelector("img, video");
+        const hasMedia = child.querySelector("img, video") || child.matches("figure.rd-video");
         if (!child.textContent.trim() && !hasMedia) return; // skip empty blocks
         out.appendChild(child);
         return;
@@ -997,7 +1011,7 @@
       // plain <div>s, so a flat whitelist would drop the whole body.
       // Unwrap the wrapper and lift its allowed blocks instead of
       // losing them - nested wrappers are handled height-first.
-      const inner = child.querySelector(ALLOWED_TOP_SELECTOR);
+      const inner = child.querySelector(ALLOWED_TOP_SELECTOR + ",figure.rd-video");
       if (!inner) return; // nothing readable inside - drop the wrapper
       [...child.children].forEach((c) => flattenInto(out, c));
     });
@@ -1008,7 +1022,7 @@
   // wrapping <div>s first. Keeps child order while it unwraps.
   function flattenInto(out, node) {
     if (ALLOWED_TOP.has(node.tagName)) {
-      const hasMedia = node.querySelector("img, video");
+      const hasMedia = node.querySelector("img, video") || node.matches("figure.rd-video");
       if (node.textContent.trim() || hasMedia) out.appendChild(node);
       return;
     }
@@ -1019,17 +1033,26 @@
     // walk below already contains the photo. Detach them first so the
     // recursion cannot reach them a second time (a wrapper with several
     // photos would otherwise duplicate every one).
+    // Our video blocks are self-contained units: lift them whatever the
+    // wrapper holds, so a caption <p> next to the clip cannot swallow it.
+    [...node.querySelectorAll("figure.rd-video")].forEach((m) => out.appendChild(m));
     if (!node.textContent.trim()) {
-      [...node.querySelectorAll("img, figure.rd-video")].forEach((m) => out.appendChild(m));
+      [...node.querySelectorAll("img")].forEach((m) => out.appendChild(m));
     }
     [...node.children].forEach((c) => flattenInto(out, c));
   }
 
   // ---- videos ---------------------------------------------------------
-  // VnExpress ships clips as an adaptive HLS playlist (master.m3u8, served
-  // as "application/x-mpegURL"). Safari plays HLS natively; Chrome and
-  // Firefox do not, so those browsers get the MP4 renditions listed inside
-  // the playlist (see hlsMp4Sources()).
+  // VnExpress ships clips as an adaptive HLS playlist (master.m3u8) from
+  // d1.vnecdn.net, and that host enforces hotlink protection: it answers
+  // 406/407 unless Referer is vnexpress.net, which a browser cannot set.
+  // Verified in Chrome - native <video> fails with DEMUXER_ERROR, hls.js
+  // with manifestLoadError - so a clip cannot be played from this origin at
+  // all. X-Frame-Options/CSP block embedding the article too.
+  //
+  // So each clip renders as its still frame with a play overlay, and both
+  // open the clip on VnExpress, where it plays normally. That keeps the
+  // story's visuals and order instead of silently dropping the media.
   //
   // The markup is a 4-level nest, and the player wrapper is display:none
   // until VnExpress's own JS builds a player inside it:
@@ -1043,8 +1066,6 @@
   // So the poster and caption come from the <figure>, not from next to the
   // <video>.
   const VIDEO_SRC_RE = /\.m3u8(?:[?#]|$)/i;
-  // The only <video> attributes a reader-side player needs.
-  const VIDEO_KEEP_ATTRS = new Set(["controls", "preload", "playsinline", "poster", "src", "data-hls"]);
 
   // Poster frames come from the image CDN (i1-/vcdn1-...), same as <img>.
   function isTrustedImageUrl(u) {
@@ -1057,40 +1078,70 @@
     return /^https:\/\/d\d+\.vnecdn\.net\//i.test(u || "") && VIDEO_SRC_RE.test(u || "");
   }
 
+  // The player chrome we render ourselves: a poster with a big ▶ over it.
+  // Clicking anywhere on it opens the clip on VnExpress, which is the only
+  // place it can play (see the hotlink note above).
   function buildVideoBlock(src, poster, caption, sourceUrl) {
     const fig = document.createElement("figure");
     fig.className = "rd-video";
-    const video = document.createElement("video");
-    video.setAttribute("controls", "");
-    video.setAttribute("preload", "metadata");
-    video.setAttribute("playsinline", "");
-    if (isTrustedImageUrl(poster)) {
-      video.setAttribute("poster", poster);
+
+    // A real link (not a div) so keyboard, middle-click and "open in new
+    // tab" all behave the way readers expect.
+    const link = document.createElement(sourceUrl ? "a" : "div");
+    link.className = "rd-video-poster";
+    if (sourceUrl) {
+      link.href = sourceUrl;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.dataset.external = "1"; // keep it off-site (see the <a> pass)
+      link.setAttribute("aria-label", (caption || "Video") + " — xem trên VnExpress");
     }
-    // Src stays out of the markup: attachHlsPlayer() decides between native
-    // HLS (Safari) and hls.js. data-hls carries the playlist through the
-    // attribute sanitiser.
-    video.dataset.hls = src;
-    fig.appendChild(video);
-    if (caption || sourceUrl) {
+
+    // Box carries the aspect ratio; the <img> sizes itself inside it. Using
+    // the real poster (not a <video>) means no dead player, no JS needed,
+    // and the frame shows even with images loading lazily.
+    const box = document.createElement("span");
+    box.className = "rd-video-frame";
+    if (isTrustedImageUrl(poster)) {
+      const img = document.createElement("img");
+      img.src = poster;
+      img.alt = caption || "Video";
+      img.loading = "lazy";
+      img.decoding = "async";
+      img.referrerPolicy = "no-referrer";
+      img.onerror = () => {
+        box.classList.add("rd-video-frame--noimg");
+        img.remove();
+      };
+      box.appendChild(img);
+    } else {
+      box.classList.add("rd-video-frame--noimg");
+    }
+
+    const play = document.createElement("span");
+    play.className = "rd-video-play";
+    play.setAttribute("aria-hidden", "true");
+    box.appendChild(play);
+
+    const badge = document.createElement("span");
+    badge.className = "rd-video-badge";
+    badge.textContent = "▶ Video";
+    box.appendChild(badge);
+
+    link.appendChild(box);
+    fig.appendChild(link);
+
+    if (caption) {
       const cap = document.createElement("figcaption");
-      if (caption) cap.appendChild(document.createTextNode(caption));
-      // The clip itself lives behind VnExpress's hotlink protection, so this
-      // link is the way to actually watch it.
-      if (sourceUrl) {
-        const link = document.createElement("a");
-        link.href = sourceUrl;
-        link.target = "_blank";
-        link.rel = "noopener";
-        link.className = "rd-video-link";
-        link.textContent = "▶ Xem video trên VnExpress";
-        if (caption) cap.appendChild(document.createTextNode(" "));
-        cap.appendChild(link);
-      }
+      cap.textContent = caption;
       fig.appendChild(cap);
     }
+    // Kept so a future deployment (self-hosted / proxied) can still attach
+    // a real player; unused while the CDN blocks this origin.
+    fig.dataset.hls = src;
     return fig;
   }
+
 
   // Replace every VnExpress clip with a clean <figure class="rd-video">
   // before the strip pass removes <video>/<source>/<iframe> and the junk
@@ -1110,166 +1161,45 @@
         video.closest(".box_embed_video");
       if (!wrapper || !root.contains(wrapper)) wrapper = video;
 
-      const fig = wrapper.closest("figure") || wrapper.parentElement || wrapper;
+      // Real shape (verified against the live article):
+      //   figure.item_slide_show
+      //     div#video_parent_N.box_embed_video_parent
+      //       div.box_img_video
+      //         img.thumb-above-video      <- the poster frame
+      //       div#embed_video_N.box_embed_video
+      //         ... video#media-video-N, .parser_title   <- hidden player
+      //     figcaption.desc_cation
+      // There is no <meta itemprop=url> here, so the poster is the lazy
+      // thumb, and the caption is .parser_title (short) or the figcaption.
+      const hostFig = wrapper.closest("figure");
 
-      // poster: full-size frame from the figure <meta>, else the lazy <img>
       let poster = "";
-      const meta = fig.querySelector && fig.querySelector("meta[itemprop='url']");
-      if (meta) poster = (meta.getAttribute("content") || "").trim();
-      if (!poster) {
-        const img = fig.querySelector && fig.querySelector("img");
-        if (img) poster = (img.getAttribute("data-src") || img.getAttribute("src") || "").trim();
-      }
-      poster = decodeAmp(poster).trim();
+      const thumb =
+        (hostFig && hostFig.querySelector("img.thumb-above-video")) ||
+        (hostFig && hostFig.querySelector(".box_img_video img")) ||
+        (hostFig && hostFig.querySelector("img[data-src], img[src]"));
+      if (thumb) poster = thumb.getAttribute("data-src") || thumb.getAttribute("src") || "";
+      poster = decodeAmp(poster || "").trim();
 
-      const capEl = fig.querySelector && fig.querySelector(".parser_title, figcaption");
+      const capEl =
+        (hostFig && hostFig.querySelector(".parser_title")) ||
+        (hostFig && hostFig.querySelector("figcaption"));
       const caption = capEl ? capEl.textContent.replace(/\s+/g, " ").trim() : "";
 
+      // Swap the whole figure out: the player box inside it is display:none,
+      // so replacing only that would leave an empty frame behind.
+      const host = hostFig && root.contains(hostFig) ? hostFig : wrapper;
+
       const block = buildVideoBlock(src, poster, caption, sourceUrl);
-      // Replace the player wrapper in place; when there is no wrapper, the
-      // video itself stands in.
-      wrapper.replaceWith(block);
-
-      // Drop the figure's now-redundant poster image: it is the same frame
-      // shown in the player, and its lazy <img> would render as a broken
-      // picture above the video (the data-src placeholder is a 1px gif).
-      if (fig && fig !== wrapper && root.contains(fig)) {
-        fig.querySelectorAll("meta, picture, img").forEach((n) => n.remove());
-      }
+      // Replace in place so the clip keeps its slot in the story.
+      host.replaceWith(block);
     });
   }
 
-  // VnExpress clips are HLS (AES-128 encrypted .ts segments) served from
-  // d1.vnecdn.net behind hotlink protection: the player CDN answers 406/407
-  // unless the Referer is vnexpress.net, and a browser cannot forge that
-  // header. So a clip embedded on this site cannot be played here at all -
-  // verified against Chrome and against native <video> HLS.
-  //
-  // What we DO render is the still frame + the caption, plus a link that
-  // opens the clip on VnExpress where it plays normally. That keeps the
-  // story's visuals and order intact instead of silently dropping the
-  // media, which is what the old sanitiser did.
-  //
-  // The player is only attached when the CDN is reachable from the current
-  // origin (self-hosted / reverse-proxied deployments, where Referer checks
-  // do not apply). Probing is a single HEAD per page; failure is cached so
-  // github.io visitors do not pay for it on every article.
-  const HLS_CDN = "https://cdn.jsdelivr.net/npm/hls.js@1.5.20/dist/hls.min.js";
-  const HLS_SRI = "sha384-V5ruNBgmYcC3SJRUQeNykAAAgde5gOFq/Hu0CZj7bygDP0yRIhkvX8+w0u/7mRvr";
-  const NATIVE_HLS = (() => {
-    try {
-      return !!document.createElement("video").canPlayType("application/vnd.apple.mpegurl");
-    } catch {
-      return false;
-    }
-  })();
-
-  let videoCdnOk = null; // null = untested, false = hotlink-blocked
-  let hlsLoading = null;
-  let hlsBroken = false;
-
-  // Can this origin actually fetch VnExpress media? One ranged GET (small,
-  // cached by the CDN) answers it; 200 = yes, anything else = hotlink block.
-  async function videoCdnReachable(src) {
-    if (videoCdnOk !== null) return videoCdnOk;
-    try {
-      const res = await fetchWithTimeout(src, 8000, { Range: "bytes=0-0" });
-      videoCdnOk = res.ok;
-    } catch {
-      videoCdnOk = false;
-    }
-    return videoCdnOk;
-  }
-
-  function loadHlsJs() {
-    if (window.Hls) return Promise.resolve(window.Hls);
-    if (hlsBroken) return Promise.reject(new Error("hls.js unavailable"));
-    if (hlsLoading) return hlsLoading;
-    hlsLoading = new Promise((resolve, reject) => {
-      const s = document.createElement("script");
-      s.src = HLS_CDN;
-      s.async = true;
-      s.crossOrigin = "anonymous";
-      // SRI pins the exact bytes we reviewed: a tampered CDN file fails
-      // closed instead of executing.
-      s.integrity = HLS_SRI;
-      s.onload = () => (window.Hls ? resolve(window.Hls) : reject(new Error("hls.js missing")));
-      s.onerror = () => reject(new Error("hls.js blocked"));
-      document.head.appendChild(s);
-    }).catch((e) => {
-      hlsBroken = true; // one failure per page is enough
-      throw e;
-    });
-    return hlsLoading;
-  }
-
-  // Mark a clip as "not playable here": keep the still frame, drop the dead
-  // player chrome, and make the caption lead to the real video.
-  function degradeVideo(fig, why) {
-    fig.classList.add("rd-video--static");
-    if (why) fig.dataset.reason = why;
-    const video = fig.querySelector("video");
-    if (video) {
-      video.removeAttribute("controls");
-      video.removeAttribute("src");
-      video.setAttribute("muted", "");
-    }
-  }
-
-  // Attach a player to each clip in `scope`, or degrade it to the poster.
-  // Runs after every article render; cheap when the CDN is known to block.
-  async function attachHlsPlayer(scope) {
-    if (!scope) return;
-    const figs = [...scope.querySelectorAll("figure.rd-video")];
-    const pending = figs.filter((f) => !f.dataset.player);
-    if (!pending.length) return;
-
-    const first = pending[0].querySelector("video[data-hls]");
-    const playlist = first && first.dataset.hls;
-    if (!playlist) return;
-
-    if (!(await videoCdnReachable(playlist))) {
-      pending.forEach((f) => degradeVideo(f, "hotlink"));
-      return;
-    }
-
-    if (NATIVE_HLS) {
-      pending.forEach((f) => {
-        f.dataset.player = "native";
-        const v = f.querySelector("video");
-        v.setAttribute("src", v.dataset.hls);
-        v.removeAttribute("data-hls");
-      });
-      return;
-    }
-
-    let Hls;
-    try {
-      Hls = await loadHlsJs();
-    } catch {
-      pending.forEach((f) => degradeVideo(f, "no-hls"));
-      return;
-    }
-    for (const fig of pending) {
-      const video = fig.querySelector("video");
-      if (!video || !video.dataset.hls) continue;
-      fig.dataset.player = "hls";
-      const src = video.dataset.hls;
-      video.removeAttribute("data-hls");
-      if (!Hls.isSupported()) {
-        degradeVideo(fig, "unsupported");
-        continue;
-      }
-      const hls = new Hls({ enableWorker: true });
-      hls.loadSource(src);
-      hls.attachMedia(video);
-      hls.on(Hls.Events.ERROR, (_e, data) => {
-        if (!data || !data.fatal) return;
-        hls.destroy();
-        degradeVideo(fig, "stream");
-      });
-    }
-  }
+  // The clip is a poster + link now (the CDN blocks playback from this
+  // origin), so there is nothing to attach. Kept as a no-op seam: a
+  // self-hosted/proxied deployment can restore a real player here.
+  function attachHlsPlayer() {}
 
   function urlBasename(u) {
     try {

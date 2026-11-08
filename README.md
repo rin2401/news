@@ -246,17 +246,29 @@ cannot set. Verified from Chrome — a plain `<video src>` fails with
 `manifestLoadError`. Article images (`i1-…`, `iv1-…`) are *not* restricted,
 which is why photos work and video does not.
 
-So the reader renders the still frame + caption in the story's original
-position, and links to the clip on VnExpress. `attachHlsPlayer()` still
-plays the clip when the page is served from an origin the CDN allows
-(self-hosted/reverse-proxied), using native HLS on Safari and lazily
-loading hls.js (jsDelivr, pinned by SRI) elsewhere.
+So each clip renders as its **still frame with a play overlay**, and both
+the frame and the caption open the clip on VnExpress in a new tab, where it
+plays normally. That keeps the story's visuals and order instead of silently
+dropping the media, which is what the sanitiser used to do.
 
-The sanitiser keeps these blocks via `.rd-video`: `liftVideos()` runs before
-the tag-strip pass, the player is exempted from `STRIP_SELECTOR` (its wrapper
-matches `[class*='box_']`), and `figure` cleanup keeps a figure that holds a
-`<video>`. Cached article HTML is stamped `ARTICLE_HTML_VERSION` so bodies
-cached by an older build (which dropped clips entirely) are refetched.
+The block is a plain `<a target="_blank"><img>` — no `<video>`, no player
+script, no third-party dependency. It degrades to a 16:9 dark stage with the
+play button if the poster cannot load.
+
+Keeping it through the sanitiser takes three exemptions in `js/app.js`:
+
+- `liftVideos()` runs **before** the tag-strip pass and swaps each clip for a
+  `<figure class="rd-video">`, pulling the poster from
+  `img.thumb-above-video` and the caption from `.parser_title`.
+- The strip pass (`STRIP_SELECTOR`) skips anything **inside or containing**
+  one of those blocks — the wrapper is
+  `div.box_embed_video_parent`, which matches `[class*='box_']`, and it is an
+  *ancestor* of the block, so a `closest()`-only check would still drop it.
+- `figure` cleanup keeps a figure that holds media **or contains** a
+  `.rd-video`; VnExpress nests the clip two figures deep.
+
+Cached article HTML is stamped `ARTICLE_HTML_VERSION` so bodies cached by an
+older build (which dropped clips entirely) are refetched.
 
 ## Local development
 

@@ -2755,3 +2755,116 @@ html.chat-open .chat-fab { display: none; }
 
   .chat-spin { animation-duration: 2.4s; }
 }
+
+/* Inline video clip: still frame + play overlay, linking to VnExpress (the
+   clip cannot play from this origin - see the note in js/app.js). */
+.reader-body .rd-video {
+  margin: 16px 0 4px;
+}
+
+.reader-body .rd-video-poster {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #000;
+  text-decoration: none;
+  line-height: 0; /* kill the inline-image baseline gap */
+  -webkit-tap-highlight-color: transparent;
+}
+
+.reader-body .rd-video-frame {
+  display: block;
+  position: relative;
+}
+
+.reader-body .rd-video-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: min(80vh, 640px);
+  object-fit: cover;
+  transition: transform 0.25s ease, opacity 0.2s ease;
+}
+
+/* No poster (blocked/absent): keep a 16:9 stage so the play button still
+   has somewhere to sit instead of collapsing to nothing. */
+.reader-body .rd-video-frame--noimg {
+  aspect-ratio: 16 / 9;
+  background: linear-gradient(135deg, #1c1c1e, #000);
+}
+
+.reader-body .rd-video-poster:hover .rd-video-frame img {
+  transform: scale(1.03);
+  opacity: 0.9;
+}
+
+/* Play button: a CSS triangle in a ring, no icon font, no SVG payload. */
+.reader-body .rd-video-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 68px;
+  height: 68px;
+  margin: -34px 0 0 -34px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(2px);
+  transition: transform 0.2s ease, background 0.2s ease;
+  pointer-events: none; /* the whole poster is the click target */
+}
+
+.reader-body .rd-video-play::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  margin: -13px 0 0 -8px; /* optical centre of a triangle */
+  border-style: solid;
+  border-width: 13px 0 13px 21px;
+  border-color: transparent transparent transparent #fff;
+}
+
+.reader-body .rd-video-poster:hover .rd-video-play,
+.reader-body .rd-video-poster:focus-visible .rd-video-play {
+  transform: scale(1.08);
+  background: rgba(0, 0, 0, 0.72);
+}
+
+.reader-body .rd-video-poster:focus-visible {
+  outline: 3px solid var(--link-hover, #0a84ff);
+  outline-offset: 2px;
+}
+
+/* Corner badge: makes "this opens elsewhere" obvious before the click. */
+.reader-body .rd-video-badge {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  pointer-events: none;
+}
+
+.reader-body .rd-video figcaption {
+  margin-top: 8px;
+  text-align: left;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reader-body .rd-video-frame img,
+  .reader-body .rd-video-play {
+    transition: none;
+  }
+  .reader-body .rd-video-poster:hover .rd-video-frame img {
+    transform: none;
+  }
+}
