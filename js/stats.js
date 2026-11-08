@@ -55,6 +55,9 @@
   const STACK_TOP = 5; // top N categories keep their colour, rest = "Khác"
   const DAY_MS = 86400000;
   const MAX_LABELS = 10; // day labels before the axis is thinned
+  // Roughly how wide a "dd/mm" label is at the 10px axis font: below this
+  // per-column width, only every other label can fit.
+  const LABEL_WIDTH_PX = 28;
 
   const WEEKDAYS = ["CN", "Hai", "Ba", "Tư", "Năm", "Sáu", "Bảy"];
   const WEEKDAYS_LONG = [
@@ -438,23 +441,43 @@
   // stand alone, first and last day always labelled. Labels never
   // rotate, so a chart can't grow a sideways scrollbar on a phone.
   // ------------------------------------------------------------------
-  function axisLabels(keys, narrow) {
+  /* Column width right now, or 0 while the chart is not laid out yet (the
+   * stats view is hidden on load, so getBoundingClientRect() is all zeros
+   * then and the caller falls back to the safe, thinned axis). */
+  function slotWidth(box, n) {
+    if (!box || !n) return 0;
+    const w = box.clientWidth;
+    return w > 0 ? w / n : 0;
+  }
+
+  /* Day labels under the column chart.
+   *
+   * Labels are wider than one column and CSS lets them spill sideways out of
+   * their slot (.col-x), so two labels must sit at least two slots apart or
+   * they overlap. Thin the axis to fit the budget, then always keep the last
+   * day - and keep its neighbour too when the columns are wide enough that
+   * both fit side by side.
+   *
+   * `slotPx` is the measured column width (0 when it cannot be known yet,
+   * e.g. while the view is still hidden); it only decides whether the last
+   * pair is tight or roomy. */
+  function axisLabels(keys, narrow, slotPx) {
     const meta = keys.map((key) => {
       const wd = weekdayOf(key);
       return { short: fmtDayShort(key), wd: WEEKDAYS[wd], weekend: wd === 0 || wd === 6 };
     });
     const n = meta.length;
     if (!n) return [];
-    // Labels spill sideways out of their slot (see .col-x), so neighbours
-    // closer than 2 slots would collide. Pick the widest spacing that fits
-    // the budget, then always keep the first and last day - nudging the last
-    // one left when it would land on its neighbour.
     const budget = narrow ? 5 : MAX_LABELS;
     const step = Math.max(1, Math.ceil((n - 1) / Math.max(1, budget - 1)));
     const out = meta.map(() => "");
     for (let i = 0; i < n; i += step) out[i] = meta[i].short;
-    // The last day is always labelled; drop the label it would sit on.
-    if (n > 1 && out[n - 2]) out[n - 2] = "";
+
+    // The last day always keeps its label. Every label out to be adjacent
+    // needs a column at least as wide as the text; below that, drop the one
+    // that would sit on it.
+    const roomy = slotPx > 0 && slotPx >= LABEL_WIDTH_PX;
+    if (n > 1 && !roomy) out[n - 2] = "";
     out[n - 1] = meta[n - 1].short;
     if (step === 1) {
       meta.forEach((m, i) => {
@@ -543,7 +566,7 @@
 
     const max = Math.max.apply(null, days.map((k) => counts[k] || 0).concat([1]));
     const narrow = state.narrow.matches;
-    const labels = axisLabels(days, narrow);
+    const labels = axisLabels(days, narrow, slotWidth(box, days.length));
     const showVals = valuesFit(days.length, narrow);
     const peak = days
       .map((k) => ({ k: k, c: counts[k] || 0 }))
@@ -733,7 +756,11 @@
 
     const totals = days.map((k) => colTotal[k] || 0);
     const max = Math.max.apply(null, totals.concat([1]));
-    const labels = axisLabels(days, state.narrow.matches);
+    const labels = axisLabels(
+      days,
+      state.narrow.matches,
+      slotWidth(els.dayStack, days.length)
+    );
     const showVals = valuesFit(days.length, state.narrow.matches);
     const grand = {};
     series.forEach((s) => {
