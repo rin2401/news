@@ -2927,7 +2927,13 @@ html.chat-open .chat-fab { display: none; }
    proxied <video>. Everything here is additive so it cannot disturb the
    poster card that readers see before pressing play. */
 .reader-body .rd-video-play {
+  /* The base rule disables pointer events so the whole poster stays one
+     click target - fine while the ring was decoration, wrong now that it is
+     a button. Without this every click fell through to the <img> and
+     opened VnExpress instead of starting the in-page player. */
+  pointer-events: auto;
   cursor: pointer;
+  z-index: 2;
 }
 
 .reader-body .rd-video--playing {
