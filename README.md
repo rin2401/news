@@ -28,6 +28,22 @@ browser.
 - 10-minute `localStorage` cache for instant navigation + offline fallback
 - No build step, no dependencies — plain HTML/CSS/JS
 
+## Read aloud (TTS)
+
+Google Translate TTS rejects any request past ~200 characters (measured: 200
+OK, 202 → HTTP 400), so the summary is split across several `<audio>` requests
+played back to back.
+
+Chunks break at **sentence boundaries**, not at a fixed character count, so
+playback never stops mid-clause. Sentences are packed greedily into a chunk;
+only a single sentence longer than one request is broken further — at a clause
+mark (`;` `:` `,`) first, then any space. Abbreviations that contain a dot
+(`GS.TS`, `UBND`, `TS.`, numbered list markers like `1.`) do not end a
+sentence, so they are not used as cut points.
+
+Splitting is lossless: `chunks.join(" ") === summary` (whitespace-normalised),
+so nothing is dropped or duplicated between requests.
+
 ## AI summary
 
 Works out of the box with two free, key-less, CORS-enabled providers, and

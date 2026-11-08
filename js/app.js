@@ -1712,26 +1712,109 @@
   }
 
   // Split the summary into Google Translate TTS requests of <= TTS_MAX
-  // chars (the endpoint answers HTTP 400 past ~200). One forward scan,
-  // cutting at the last space that fits. The previous version did
-  // `cur = s.slice(0, 180)`, which silently DROPPED everything after char
-  // 180 of any sentence longer than one request, so long summaries lost
-  // their tail. Invariant: ttsChunks(t).join(" ") === t (whitespace-normalised).
-  const TTS_MAX = 190;
+  // chars, preferring to cut at sentence boundaries so playback never stops
+  // mid-clause. The endpoint rejects anything past ~200 chars (measured:
+  // 200 OK, 202 -> HTTP 400), so TTS_MAX leaves a small margin.
+  //
+  // Two levels: sentences are packed greedily into a chunk, and only a
+  // single sentence longer than one request is broken down further - at a
+  // clause mark first, then any space, then a hard cut.
+  // Invariant: ttsChunks(t).join(" ") === t (whitespace-normalised).
+  const TTS_MAX = 195;
+
+  // Tokens that end with a dot without ending the sentence.
+  const TTS_ABBREV = new Set([
+    "GS", "TS", "PGS", "ThS", "BS", "KS", "TP", "UBND", "HĐND", "VN",
+    "Q", "P", "H", "Th", "Nxb", "Co", "Ltd", "Inc", "St", "Mr", "Mrs",
+    "Ms", "Dr", "vs", "etc", "No", "Vol",
+  ]);
+
+  // Sentence splitter that keeps the terminator attached to its sentence.
+  function ttsSentences(text) {
+    const out = [];
+    let buf = "";
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      buf += ch;
+      if (ch !== "." && ch !== "!" && ch !== "?" && ch !== "…") continue;
+      // swallow a run of terminators / closing quotes: "...", "?!", ”
+      let j = i + 1;
+      while (j < text.length && /[.!?…'"”’»)\]]/.test(text[j])) {
+        buf += text[j];
+        j++;
+      }
+      i = j - 1;
+      if (ch === ".") {
+        // A dot ends a sentence only before whitespace + capital/EOS, and
+        // never after a known abbreviation or a numbered list marker.
+        const rest = text.slice(i + 1);
+        const nextOk = /^\s+[A-ZÀ-Ỹ"“(\[]/.test(rest) || /^\s*$/.test(rest);
+        const tok = (buf.trim().split(/\s+/).pop() || "").replace(/[^\p{L}.]/gu, "");
+        if (TTS_ABBREV.has(tok.replace(/\.$/, "")) || /^\d+\.$/.test(tok) || !nextOk) {
+          continue;
+        }
+      }
+      if (buf.trim()) out.push(buf.trim());
+      buf = "";
+    }
+    if (buf.trim()) out.push(buf.trim());
+    return out;
+  }
+
+  // Break one over-long sentence: clause punctuation beats a bare space.
+  function ttsSplitLong(seg) {
+    const parts = [];
+    let rest = seg;
+    while (rest.length > TTS_MAX) {
+      const win = rest.slice(0, TTS_MAX + 1);
+      let cut = -1;
+      for (const re of [/[;:]\s/g, /,\s/g, /\s[–—]\s/g]) {
+        let m;
+        let last = -1;
+        while ((m = re.exec(win))) last = m.index + m[0].length;
+        // Ignore a clause mark so early it would strand the rest
+        if (last > TTS_MAX * 0.4) {
+          cut = last;
+          break;
+        }
+      }
+      if (cut < 0) {
+        const sp = win.lastIndexOf(" ");
+        if (sp > 0) cut = sp + 1;
+      }
+      if (cut <= 0) cut = TTS_MAX; // no space at all
+      parts.push(rest.slice(0, cut).trim());
+      rest = rest.slice(cut).trim();
+    }
+    if (rest) parts.push(rest);
+    return parts.filter(Boolean);
+  }
+
   function ttsChunks(text) {
     const clean = String(text || "").replace(/\s+/g, " ").trim();
     if (!clean) return [];
     const out = [];
-    let at = 0;
-    while (at < clean.length) {
-      let end = Math.min(at + TTS_MAX, clean.length);
-      if (end < clean.length) {
-        const sp = clean.lastIndexOf(" ", end);
-        if (sp > at) end = sp; // cut at a word boundary (else: giant word)
+    let cur = "";
+    const flush = () => {
+      if (cur.trim()) out.push(cur.trim());
+      cur = "";
+    };
+    for (const s of ttsSentences(clean)) {
+      const need = (cur ? cur.length + 1 : 0) + s.length;
+      if (need <= TTS_MAX) {
+        cur = cur ? cur + " " + s : s; // still fits: pack it in
+        continue;
       }
-      out.push(clean.slice(at, end).trim()); // glue char dropped...
-      at = end + 1; // ...consumed here (join(" ") rebuilds `clean`)
+      flush();
+      if (s.length <= TTS_MAX) {
+        cur = s;
+      } else {
+        const ps = ttsSplitLong(s);
+        for (let i = 0; i < ps.length - 1; i++) out.push(ps[i]);
+        cur = ps[ps.length - 1];
+      }
     }
+    flush();
     return out;
   }
 
