@@ -1090,7 +1090,7 @@
   // The player chrome we render ourselves: a poster with a big ▶ over it.
   // Clicking anywhere on it opens the clip on VnExpress, which is the only
   // place it can play (see the hotlink note above).
-  function buildVideoBlock(src, poster, caption, sourceUrl) {
+  function buildVideoBlock(src, poster, caption, sourceUrl, videoId) {
     const fig = document.createElement("figure");
     fig.className = "rd-video";
 
@@ -1099,7 +1099,11 @@
     const link = document.createElement(sourceUrl ? "a" : "div");
     link.className = "rd-video-poster";
     if (sourceUrl) {
-      link.href = sourceUrl;
+      // VnExpress keeps each clip in #video_parent_<id>. Linking straight at
+      // it makes the article open scrolled to that clip AND auto-play it
+      // (verified: paused=false a few seconds after load), which is as close
+      // to "watch it here" as the CDN's hotlink block allows.
+      link.href = videoId ? sourceUrl + "#video_parent_" + videoId : sourceUrl;
       link.target = "_blank";
       link.rel = "noopener";
       link.dataset.external = "1"; // keep it off-site (see the <a> pass)
@@ -1205,7 +1209,7 @@
       // so replacing only that would leave an empty frame behind.
       const host = hostFig && root.contains(hostFig) ? hostFig : wrapper;
 
-      const block = buildVideoBlock(src, poster, caption, sourceUrl);
+      const block = buildVideoBlock(src, poster, caption, sourceUrl, vid);
       // Replace in place so the clip keeps its slot in the story.
       host.replaceWith(block);
     });
@@ -2251,7 +2255,7 @@
   // Bumped when the sanitiser's output shape changes, so a reader who has
   // the old markup cached (e.g. bodies from before videos were kept) does not
   // keep being served it for 24h. 2 = inline videos are preserved.
-  const ARTICLE_HTML_VERSION = 3;
+  const ARTICLE_HTML_VERSION = 4;
 
   function saveArticleHtml(link, html) {
     try {
