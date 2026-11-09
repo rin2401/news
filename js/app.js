@@ -1346,9 +1346,27 @@
           if (!Hls.isSupported()) return fail("trình duyệt không hỗ trợ");
           hls = new Hls({
             xhrSetup,
+            // Left on: transcoding/muxing off the main thread keeps scrolling
+            // smooth. The cost is one structuredClone of each ~1MB segment.
             enableWorker: true,
             lowLatencyMode: false,
-            maxBufferLength: 30,
+            // Sized in segments, not seconds: this clip's fragments are
+            // 5.12s, so 30s meant six of them in flight. Measured behaviour
+            // was worse than that - fragments 1 and 2 were fetched eight
+            // times in the first seven seconds (16 fragments in total, 23
+            // requests), because the loader kept restarting while the initial
+            // buffer was still filling. Each of those retries is a request
+            // against the Worker, so start small and let playback pull the
+            // rest: 4 fragments (~20s) fills fast and stops re-fetching.
+            maxBufferLength: 20,
+            // Without this, hls.js may re-request a fragment it already has
+            // once the buffer slides - the other source of duplicate fetches.
+            backBufferLength: 30,
+            // Default is 3; each retry is a full 1MB re-download over the
+            // Worker. Fewer tries, slower backoff.
+            manifestLoadingMaxRetry: 2,
+            levelLoadingMaxRetry: 3,
+            fragLoadingMaxRetry: 4,
           });
           hls.on(Hls.Events.ERROR, (_e, data) => {
             if (!data.fatal) return;
