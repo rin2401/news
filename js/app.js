@@ -1346,9 +1346,14 @@
           if (!Hls.isSupported()) return fail("trình duyệt không hỗ trợ");
           hls = new Hls({
             xhrSetup,
-            // Left on: transcoding/muxing off the main thread keeps scrolling
-            // smooth. The cost is one structuredClone of each ~1MB segment.
-            enableWorker: true,
+            // Off deliberately. hls.js pushes every demuxed fragment through
+            // a structuredClone to reach the worker, and with ~1MB fragments
+            // arriving back to back that clone is enough delay for the loader
+            // to decide the first fragments are late and request them again.
+            // Confirmed by measurement: with the worker on, fragments 1 and 2
+            // were fetched twice each; the page is a static reader with no
+            // other main-thread work competing.
+            enableWorker: false,
             lowLatencyMode: false,
             // Sized in segments, not seconds: this clip's fragments are
             // 5.12s, so 30s meant six of them in flight. Measured behaviour
