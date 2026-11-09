@@ -3033,3 +3033,25 @@ html.chat-open .chat-fab { display: none; }
   aspect-ratio: auto;
   max-height: min(70vh, 520px);
 }
+
+/* The generic `.rd-video video` rule above sets width:100% and a 640px
+   max-height. With object-fit:contain that leaves a portrait clip shrunk
+   inside a landscape box - black bars either side. Be more specific for the
+   player we build: no width, no cap, the ratio drives both dimensions. */
+.reader-body .rd-video--playing .rd-video-el {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: min(70vh, 560px);
+  aspect-ratio: 9 / 16;
+  object-fit: contain;
+  margin-left: auto;
+  margin-right: auto;
+  background: #000;
+  border-radius: 8px;
+}
+
+.reader-body .rd-video--playing .rd-video-el[data-portrait="0"] {
+  width: 100%;
+  aspect-ratio: auto;
+}
