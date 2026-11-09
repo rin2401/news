@@ -3055,3 +3055,23 @@ html.chat-open .chat-fab { display: none; }
   width: 100%;
   aspect-ratio: auto;
 }
+
+/* ---- full-width stage ----------------------------------------------------
+   Reversed the shrinking box above: a portrait clip was sized to its own
+   narrow ratio, which left it floating in the middle of the column at about
+   half width. Fill the column instead and let object-fit letterbox the clip
+   inside it - the black bars either side are the accepted trade. */
+.reader-body .rd-video--playing .rd-video-el,
+.reader-body .rd-video--playing .rd-video-el[data-portrait="0"],
+.reader-body .rd-video--playing .rd-video-el[data-portrait="1"] {
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  max-height: min(70vh, 560px);
+  aspect-ratio: auto;
+  object-fit: contain;
+  margin-left: 0;
+  margin-right: 0;
+  background: #000;
+  border-radius: 8px;
+}
