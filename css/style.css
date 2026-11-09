@@ -3118,3 +3118,14 @@ html.chat-open .chat-fab { display: none; }
     animation-duration: 2.4s;
   }
 }
+
+/* The ring is white-on-transparent over a busy video frame, which all but
+   disappears against a bright scene. A dark disc behind it keeps the spinner
+   legible whatever is underneath. */
+.reader-body .rd-video--loading::after {
+  border-width: 3px;
+  border-color: rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  box-shadow: 0 0 0 6px rgba(0, 0, 0, 0.35), 0 2px 12px rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.25);
+}
