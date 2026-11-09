@@ -1362,6 +1362,20 @@
     video.addEventListener("play", wire);
     video.addEventListener("pointerdown", wire);
 
+    // Portrait clips (9:16) in a column that is wider than they are tall
+    // otherwise sit in a landscape box with black bars either side. Size the
+    // player from the clip's own ratio instead. loadedmetadata arrives with
+    // the first frames, so this runs as soon as playback starts; the CSS
+    // guess of 9/16 covers the moment before.
+    const fitRatio = () => {
+      if (!video.videoWidth || !video.videoHeight) return;
+      const portrait = video.videoHeight > video.videoWidth;
+      video.dataset.portrait = portrait ? "1" : "0";
+      video.style.aspectRatio = video.videoWidth + " / " + video.videoHeight;
+    };
+    video.addEventListener("loadedmetadata", fitRatio);
+    if (video.readyState >= 1) fitRatio();
+
     block.classList.add("rd-video--playing");
     // Insert above the caption: the caption was appended when the block was
     // built, and appending the player after it put the description on top.

@@ -3012,3 +3012,24 @@ html.chat-open .chat-fab { display: none; }
   margin-left: auto;
   margin-right: auto;
 }
+
+/* ---- true clip ratio -----------------------------------------------------
+   width:100% forced every clip to the column width, so a 9:16 portrait clip
+   sat in a landscape box with dead black bars either side. Size the element
+   from its own ratio instead: height is capped, width follows. Set from the
+   real videoWidth/videoHeight once metadata is known, with 9:16 as the
+   starting guess so the box does not jump on load. */
+.reader-body .rd-video-el {
+  width: auto;
+  max-width: 100%;
+  aspect-ratio: 9 / 16;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* A landscape clip should still fill the column, not shrink to nothing. */
+.reader-body .rd-video-el[data-portrait="0"] {
+  width: 100%;
+  aspect-ratio: auto;
+  max-height: min(70vh, 520px);
+}
