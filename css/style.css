@@ -2998,3 +2998,17 @@ html.chat-open .chat-fab { display: none; }
   font-size: 13px;
   line-height: 1.5;
 }
+
+/* The poster link is hidden for good now that the player is the card, but it
+   still holds the "watch on VnExpress" fallback, so keep it reachable for
+   keyboard users rather than display:none. */
+.reader-body .rd-video--playing .rd-video-poster {
+  display: none;
+}
+
+/* Portrait clips in a landscape frame: fill the stage instead of hugging a
+   letterboxed strip, and never crop the frame. */
+.reader-body .rd-video-el {
+  margin-left: auto;
+  margin-right: auto;
+}

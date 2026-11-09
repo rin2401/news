@@ -1363,7 +1363,10 @@
     video.addEventListener("pointerdown", wire);
 
     block.classList.add("rd-video--playing");
-    block.appendChild(video);
+    // Insert above the caption: the caption was appended when the block was
+    // built, and appending the player after it put the description on top.
+    const cap = block.querySelector(":scope > figcaption");
+    block.insertBefore(video, cap);
   }
 
   // Replace every lifted clip with a real player up front, showing the
@@ -2420,7 +2423,7 @@
   // Bumped when the sanitiser's output shape changes, so a reader who has
   // the old markup cached (e.g. bodies from before videos were kept) does not
   // keep being served it for 24h. 2 = inline videos are preserved.
-  const ARTICLE_HTML_VERSION = 7;
+  const ARTICLE_HTML_VERSION = 8;
 
   function saveArticleHtml(link, html) {
     try {
