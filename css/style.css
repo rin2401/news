@@ -3129,3 +3129,65 @@ html.chat-open .chat-fab { display: none; }
   box-shadow: 0 0 0 6px rgba(0, 0, 0, 0.35), 0 2px 12px rgba(0, 0, 0, 0.5);
   background: rgba(0, 0, 0, 0.25);
 }
+
+/* ---- loading indicator, take two -----------------------------------------
+   The two ::after blocks above were written in successive commits and never
+   reconciled: the second adds a 6px ring shadow and a blurred glow on top of
+   the first's four-sided border, so the spinner rendered as a bright ring
+   inside a dark disc inside a soft smudge - heavy and dirty.
+
+   Rather than edit those (this file is append-only), draw a NEW indicator on
+   ::before, which nothing else uses, and switch the old one off. Same
+   specificity, later in the cascade, so it wins. */
+.reader-body .rd-video--loading::after {
+  content: none;
+  border: 0;
+  box-shadow: none;
+  background: none;
+  animation: none;
+}
+
+.reader-body .rd-video--loading::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 34px;
+  height: 34px;
+  margin: -17px 0 0 -17px;
+  border-radius: 50%;
+  /* One bright arc, not four coloured borders: reads as rotation. */
+  background: conic-gradient(
+    from 0turn,
+    rgba(255, 255, 255, 0) 0deg,
+    rgba(255, 255, 255, 0) 80deg,
+    #fff 350deg,
+    rgba(255, 255, 255, 0) 360deg
+  );
+  /* Punch the centre out to make a ring rather than a pie. */
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+  animation: rd-video-spin 0.9s linear infinite;
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* Brighten rather than darken: a dim frame plus a white ring competed, and
+   the dimming is what made the whole card look dull while waiting. */
+.reader-body .rd-video--loading .rd-video-el {
+  filter: none;
+  opacity: 0.35;
+}
+
+/* Reduced motion means no motion, not slower motion. */
+@media (prefers-reduced-motion: reduce) {
+  .reader-body .rd-video--loading::before {
+    animation: none;
+    background: conic-gradient(
+      from 0turn,
+      rgba(255, 255, 255, 0.3) 0deg,
+      rgba(255, 255, 255, 0.3) 300deg,
+      #fff 360deg
+    );
+  }
+}
