@@ -1158,17 +1158,16 @@
     box.appendChild(badge);
 
     link.appendChild(box);
+    fig.appendChild(link);
 
-    // The caption is part of the link, not a sibling: readers tap the text
-    // as often as the frame, and a sibling <figcaption> swallowed those taps
-    // (verified with Playwright - nothing happened).
+    // The caption sits below the player, outside the link. Inside it, the
+    // text was part of the click target and read as a title bar; as a
+    // sibling it reads as the clip's description, which is what it is.
     if (caption) {
       const cap = document.createElement("figcaption");
       cap.textContent = caption;
-      link.appendChild(cap);
+      fig.appendChild(cap);
     }
-
-    fig.appendChild(link);
     // Kept so a future deployment (self-hosted / proxied) can still attach
     // a real player; unused while the CDN blocks this origin.
     fig.dataset.hls = src;
@@ -1289,7 +1288,9 @@
     video.className = "rd-video-el";
     video.controls = true;
     video.playsInline = true;
-    video.preload = "metadata";
+    // "none" until the reader presses play: the poster is a normal image, so
+    // nothing is fetched from VnExpress' CDN for a clip nobody watches.
+    video.preload = "none";
     video.setAttribute("playsinline", "");
     if (isTrustedImageUrl(poster)) video.poster = poster;
     if (caption) video.setAttribute("aria-label", caption);
@@ -1313,19 +1314,20 @@
       block.appendChild(msg);
     };
 
-    // Some renditions are AES-128 encrypted; hls.js handles that, but a
-    // failed key fetch surfaces as a fatal error we should report plainly.
-    const start = () => {
-      video.controls = true;
-      const p = video.play();
-      if (p && p.catch) p.catch(() => {}); // autoplay may be blocked; fine
-    };
+    // Nothing is fetched until the reader presses play. The player is
+    // already on screen - that is the point - but a page can hold several
+    // clips and each is ~16MB, so wiring the source up front would bill
+    // VnExpress for readers who never watch.
+    let wired = false;
+    const wire = () => {
+      if (wired) return;
+      wired = true;
 
-    if (NATIVE_HLS) {
-      video.src = proxied(hlsUrl);
-      video.addEventListener("error", () => fail("lỗi tải video"), { once: true });
-      start();
-    } else {
+      if (NATIVE_HLS) {
+        video.src = proxied(hlsUrl);
+        video.addEventListener("error", () => fail("lỗi tải video"), { once: true });
+        return;
+      }
       loadHlsJs()
         .then((Hls) => {
           if (!Hls.isSupported()) return fail("trình duyệt không hỗ trợ");
@@ -1351,47 +1353,35 @@
           });
           hls.loadSource(hlsUrl);
           hls.attachMedia(video);
-          hls.on(Hls.Events.MANIFEST_PARSED, start);
         })
         .catch(() => fail("không tải được trình phát"));
-    }
+    };
+
+    // The native control's play press is the trigger; `play` also fires for
+    // keyboard activation and for the poster being clicked in Safari.
+    video.addEventListener("play", wire);
+    video.addEventListener("pointerdown", wire);
 
     block.classList.add("rd-video--playing");
     block.appendChild(video);
-    video.focus({ preventScroll: true });
   }
 
-  // Wire the play button on every lifted clip. The card keeps working as a
-  // link: only an explicit press on the play control swaps in the player, so
-  // a reader who just wants to read the story is never surprised by media
-  // starting on its own.
+  // Replace every lifted clip with a real player up front, showing the
+  // poster as its thumbnail. Deferring this behind a play button meant the
+  // reader saw a still image and had to guess that it was pressable.
+  //
+  // The media itself is not loaded until play is pressed: preload="none" plus
+  // hls.js only starting on demand keeps a page with several clips from
+  // pulling ~16MB per clip from VnExpress for readers who never watch them.
   function attachHlsPlayer(root) {
     root.querySelectorAll("figure.rd-video").forEach((block) => {
       const hlsUrl = block.dataset.hls;
       if (!hlsUrl || block.dataset.wired === "1") return;
       block.dataset.wired = "1";
 
-      const play = block.querySelector(".rd-video-play");
-      if (!play) return;
-      play.setAttribute("role", "button");
-      play.setAttribute("tabindex", "0");
-      play.setAttribute("aria-label", "Phát video");
-
-      const open = (event) => {
-        if (event) {
-          event.preventDefault();
-          event.stopPropagation();
-        }
-        if (block.classList.contains("rd-video--playing")) return;
-        const img = block.querySelector(".rd-video-frame img");
-        const cap = block.querySelector("figcaption");
-        buildPlayer(block, hlsUrl, img ? img.src : "", cap ? cap.textContent : "");
-      };
-
-      play.addEventListener("click", open);
-      play.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") open(e);
-      });
+      const img = block.querySelector(".rd-video-frame img");
+      const cap = block.querySelector("figcaption");
+      buildPlayer(block, hlsUrl, img ? img.src : "", cap ? cap.textContent : "");
     });
   }
 
@@ -2430,7 +2420,7 @@
   // Bumped when the sanitiser's output shape changes, so a reader who has
   // the old markup cached (e.g. bodies from before videos were kept) does not
   // keep being served it for 24h. 2 = inline videos are preserved.
-  const ARTICLE_HTML_VERSION = 6;
+  const ARTICLE_HTML_VERSION = 7;
 
   function saveArticleHtml(link, html) {
     try {

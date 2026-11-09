@@ -2969,3 +2969,32 @@ html.chat-open .chat-fab { display: none; }
     scroll-behavior: auto;
   }
 }
+
+/* ---- player-in-place -----------------------------------------------------
+   The card used to be a poster with a play ring on top, and the player only
+   appeared after a press. Now the <video> IS the card from the start, showing
+   the poster as its thumbnail, so these rules replace the old
+   poster-plus-overlay layout. Kept additive for the same reason as above. */
+.reader-body .rd-video--playing .rd-video-poster {
+  display: none;
+}
+
+.reader-body .rd-video-el {
+  display: block;
+  width: 100%;
+  /* Portrait clips are 9:16; capping the height keeps one clip from filling
+     the whole viewport on a laptop. contain (not cover) so nothing is cut. */
+  max-height: min(70vh, 520px);
+  margin: 0 auto;
+  background: #000;
+  border-radius: 8px;
+  object-fit: contain;
+}
+
+/* The caption is a real description now: below the player, not inside it. */
+.reader-body .rd-video > figcaption {
+  margin-top: 8px;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
