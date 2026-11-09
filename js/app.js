@@ -1298,9 +1298,21 @@
     let hls = null;
     let failed = false;
 
+    // Two things take real time: fetching hls.js itself, and then fetching the
+    // playlist and first segment through the worker. Both can take a couple of
+    // seconds on a phone, and a <video> with no source yet shows a black
+    // rectangle that looks frozen rather than busy.
+    const setLoading = (on) => {
+      block.classList.toggle("rd-video--loading", on);
+      video.toggleAttribute("data-loading", on);
+      if (on) video.setAttribute("aria-busy", "true");
+      else video.removeAttribute("aria-busy");
+    };
+
     const fail = (why) => {
       if (failed) return;
       failed = true;
+      setLoading(false);
       if (hls) {
         try {
           hls.destroy();
@@ -1322,6 +1334,7 @@
     const wire = () => {
       if (wired) return;
       wired = true;
+      setLoading(true);
 
       if (NATIVE_HLS) {
         video.src = proxied(hlsUrl);
@@ -1375,6 +1388,17 @@
     };
     video.addEventListener("loadedmetadata", fitRatio);
     if (video.readyState >= 1) fitRatio();
+
+    // Clear the spinner only once frames are actually on screen - `playing`
+    // fires after the first frame is presented, which is what the reader is
+    // waiting for. `canplay` would clear it while still showing a black frame.
+    video.addEventListener("playing", () => setLoading(false));
+    video.addEventListener("error", () => setLoading(false), { once: true });
+    // A stalled network keeps `playing` from ever firing; say so instead of
+    // spinning for ever.
+    video.addEventListener("waiting", () => {
+      if (!video.seeking) setLoading(true);
+    });
 
     block.classList.add("rd-video--playing");
     // Insert above the caption: the caption was appended when the block was
@@ -2437,7 +2461,7 @@
   // Bumped when the sanitiser's output shape changes, so a reader who has
   // the old markup cached (e.g. bodies from before videos were kept) does not
   // keep being served it for 24h. 2 = inline videos are preserved.
-  const ARTICLE_HTML_VERSION = 8;
+  const ARTICLE_HTML_VERSION = 9;
 
   function saveArticleHtml(link, html) {
     try {

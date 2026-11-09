@@ -3075,3 +3075,46 @@ html.chat-open .chat-fab { display: none; }
   background: #000;
   border-radius: 8px;
 }
+
+/* ---- loading indicator ---------------------------------------------------
+   Between pressing play and the first frame, the player is a black rectangle
+   (preload="none", nothing fetched yet). That reads as broken. Show a spinner
+   over the poster so the wait is visible, and keep it out of the way for
+   anyone who asked for reduced motion. */
+.reader-body .rd-video {
+  position: relative;
+}
+
+.reader-body .rd-video--loading::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 40px;
+  height: 40px;
+  margin: -20px 0 0 -20px;
+  border: 3px solid rgba(255, 255, 255, 0.25);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: rd-video-spin 0.8s linear infinite;
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* Keep the poster visible while loading so the spinner sits over the frame
+   rather than over an empty black box. */
+.reader-body .rd-video--loading .rd-video-el {
+  opacity: 0.55;
+}
+
+@keyframes rd-video-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reader-body .rd-video--loading::after {
+    animation-duration: 2.4s;
+  }
+}
