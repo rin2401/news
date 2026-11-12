@@ -25,7 +25,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=38">
+  <link rel="stylesheet" href="css/style.css?v=41">
 </head>
 <body>
   <!-- Top header -->
@@ -114,6 +114,21 @@
           <div class="sum-actions">
             <button class="sum-ai-btn" id="ttsBtn" type="button">🔊 Đọc tóm tắt</button>
             <button class="sum-ai-btn" id="ttsRateBtn" type="button" title="Tốc độ đọc (bấm để đổi)">⚡ 1×</button>
+            <div class="tts-voice">
+              <button class="sum-ai-btn" id="ttsVoiceBtn" type="button"
+                title="Chọn giọng đọc" aria-haspopup="true" aria-expanded="false"
+                aria-controls="ttsVoiceMenu">🗣 Google Dịch</button>
+              <div class="tts-voice-menu" id="ttsVoiceMenu" role="menu" hidden>
+                <button type="button" role="menuitemradio" data-voice="google" aria-checked="true">
+                  <span class="tts-voice-name">Google Dịch</span>
+                  <span class="tts-voice-hint">Giọng tiếng Việt của Google Dịch</span>
+                </button>
+                <button type="button" role="menuitemradio" data-voice="vifast" aria-checked="false">
+                  <span class="tts-voice-name">ViFastTts</span>
+                  <span class="tts-voice-hint">Model tiếng Việt (Ngọc Huyền)</span>
+                </button>
+              </div>
+            </div>
             <button class="sum-ai-btn" id="sumAiBtn" type="button">✨ Tóm tắt bằng AI</button>
           </div>
         </div>
@@ -261,7 +276,7 @@
     </div>
   </template>
 
-  <script src="js/app.js?v=46"></script>
+  <script src="js/app.js?v=48"></script>
   <!-- Chatbot: reads window.NewsChat + the news24:article event (app.js) -->
   <script src="js/chatbot.js?v=3"></script>
 </body>

@@ -26,8 +26,9 @@ browser.
   các snapshot RSS trong `data/`
 - **Summary box** under each article: an offline extractive summary paints
   instantly, then an AI summary swaps in when it arrives (cached 7 days)
-- **Read the summary aloud** via Google Translate TTS, with a reading-speed
-  toggle (0.8/1/1.25/1.5×)
+- **Read the summary aloud** with a voice picker (Google Dịch by default,
+  ViFastTts as the natural-sounding option) and a reading-speed toggle
+  (0.8/1/1.25/1.5×) — see [Read aloud](#read-aloud-tts)
 - **Chatbot** (*Hỏi AI*): ask about the article you are reading, or find
   articles by topic — grounded in the article text and the local snapshots,
   never in the model's own knowledge
@@ -68,9 +69,62 @@ node scripts/check-stats-view.mjs
 
 ## Read aloud (TTS)
 
+**🔊 Đọc tóm tắt** reads the summary box aloud with the voice picked in
+**🗣** next to it. Two voices are available; the chosen one is tried first and
+the other acts as fallback, so a dead proxy or a rate limit never leaves the
+button doing nothing.
+
+| Voice | How | Default |
+|---|---|---|
+| **Google Dịch** | Google Translate TTS, streamed through `<audio src>`. No key, no account, no rate-limit surprises. | ✅ |
+| **ViFastTts** | [tts.vifast.org](https://tts.vifast.org) `POST /api/tts` — Vietnamese ONNX model (Ngọc Huyền small, 24 kHz mono WAV). More natural pacing, reads the whole summary in **one** request. | |
+
+Both play through one `<audio>` element, so the speed button and stop behave
+identically for either voice. The default is Google Dịch because it needs no
+third-party proxy and has no per-minute cap; pick ViFastTts for the better
+voice.
+
+### Controls
+
+| Control | Behaviour |
+|---|---|
+| 🗣 `Google Dịch` / `ViFastTts` | Opens a small picker. Persisted as `news24:ttsvoice`. Switching while reading restarts the clip from the top, because the voice is baked into synthesis rather than applied at playback. |
+| ⚡ `1×` | Reading speed 0.8 / 1 / 1.25 / 1.5×. Applied on playback, so changing it mid-sentence does **not** restart the clip. Persisted as `news24:ttsrate`. |
+
+### Why ViFastTts goes through a proxy
+
+The public ViFastTts demo does **not** send `Access-Control-Allow-Origin` (it
+runs without `--cors`, per
+[`http-server/src/lib.rs`](https://github.com/vifast-oss/ViFastTts/blob/main/rust/crates/adapters/inbound/http-server/src/lib.rs)),
+so a static page on GitHub Pages cannot `fetch()` it directly — the browser
+blocks the response. Requests therefore go through a small CORS pass-through,
+`cors.rin2401.workers.dev`, which reflects the page origin and forwards the
+POST body and the WAV bytes unchanged:
+
+```text
+https://cors.rin2401.workers.dev/https://tts.vifast.org/api/tts
+```
+
+The ViFastTts demo also caps traffic at **6 requests/minute/IP** (`max_chars`
+3000, read from `/api/config`). A `429` is remembered for the session so the
+next click skips straight to Google instead of queueing again. A rejected
+*user gesture* (`NotAllowedError`) is not masked by the fallback; it surfaces
+as `⚠️ Không đọc được`.
+
+> **Only one ViFastTts voice exists.** The model is single-speaker and
+> northern; `dialect=north|central|south` is accepted by the API but returns
+> byte-identical audio (verified: same MD5 for all three), and unknown
+> `voice`/`speaker`/`model` fields are silently ignored. That is why the
+> picker lists engines, not accents — see
+> [NGOC_HUYEN.md](https://github.com/vifast-oss/ViFastTts/blob/main/docs/NGOC_HUYEN.md)
+> ("Single-speaker; không speaker ID/zero-shot"). A different voice means a
+> different model, i.e. a hosted service with an API key.
+
+### Google fallback: the 200-character splitter
+
 Google Translate TTS rejects any request past ~200 characters (measured: 200
-OK, 202 → HTTP 400), so the summary is split across several `<audio>` requests
-played back to back.
+OK, 202 → HTTP 400), so the summary is split across several requests played
+back to back.
 
 Chunks break at **sentence boundaries**, not at a fixed character count, so
 playback never stops mid-clause. Sentences are packed greedily into a chunk;
@@ -81,6 +135,13 @@ sentence, so they are not used as cut points.
 
 Splitting is lossless: `chunks.join(" ") === summary` (whitespace-normalised),
 so nothing is dropped or duplicated between requests.
+
+Check the wiring (add `--online` to also call the live API through the proxy):
+
+```bash
+node tests/tts-check.mjs
+node tests/tts-check.mjs --online
+```
 
 ## AI summary
 
@@ -334,6 +395,7 @@ js/chatbot.js # chatbot: hỏi về bài đang đọc, tìm báo theo chủ đ�
 js/stats.js   # thống kê từ data/<slug>.json, tự vẽ biểu đồ
 docs/chat-contract.md # hợp đồng chat <-> app.js
 tests/chat-check.mjs  # kiểm tra HTML/CSS/JS của chatbot
+tests/tts-check.mjs   # kiểm tra đọc to (TTS); --online để gọi API thật
 favicon.svg
 ```
 

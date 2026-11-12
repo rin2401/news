@@ -3191,3 +3191,72 @@ html.chat-open .chat-fab { display: none; }
     );
   }
 }
+
+/* ============ Read-aloud voice picker ============ */
+/* A small popover under the 🗣 button. Deliberately not <select>: the rows
+   carry a second line of context, and the closed control has to stay the
+   same pill as the speed button next to it. */
+.tts-voice { position: relative; display: inline-flex; }
+
+.tts-voice-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  /* The button sits mid-row, so anchoring left would push the popover off the
+     right edge of a phone. Anchor right and cap the width instead; both keep
+     it inside the viewport because the button is never within ~220px of the
+     left edge. */
+  right: 0;
+  z-index: 30;
+  width: max-content;
+  min-width: 216px;
+  max-width: min(280px, calc(100vw - 24px));
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px -12px rgba(0, 0, 0, 0.35);
+}
+
+.tts-voice-menu button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  font-family: var(--font-ui);
+  text-align: left;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.tts-voice-menu button:hover { background: rgba(237, 28, 36, 0.08); }
+
+.tts-voice-menu button.is-on { background: rgba(237, 28, 36, 0.1); }
+
+.tts-voice-menu button.is-on .tts-voice-name::after {
+  content: " ✓";
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.tts-voice-name { font-size: 13px; font-weight: 700; }
+
+.tts-voice-hint { font-size: 11px; color: #6b6b6b; }
+
+[data-theme="dark"] .tts-voice-hint { color: #a0a0a0; }
+
+.tts-voice-menu button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .tts-voice-menu { animation: ttsVoiceIn 120ms ease-out; }
+  @keyframes ttsVoiceIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: none; }
+  }
+}

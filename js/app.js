@@ -741,6 +741,8 @@
     sumAiBtn: document.getElementById("sumAiBtn"),
     ttsBtn: document.getElementById("ttsBtn"),
     ttsRateBtn: document.getElementById("ttsRateBtn"),
+    ttsVoiceBtn: document.getElementById("ttsVoiceBtn"),
+    ttsVoiceMenu: document.getElementById("ttsVoiceMenu"),
   };
 
   const articleCache = new Map(); // article link -> sanitized html
@@ -2516,13 +2518,39 @@
   }
 
   // ---- Read the summary aloud (TTS) ----
-  // Google Translate TTS is the ONLY voice — one implementation, no
-  // browser/OS voice fallback. Playback goes through <audio> elements so it
-  // covers Android, iOS and desktop alike. Playback is NOT CORS-checked
-  // (only fetch would be), but Google 404s any request carrying a Referer —
-  // the page-wide <meta referrer no-referrer> in index.html suppresses it.
-  // Requests must stay under ~200 chars, so the summary is split (ttsChunks).
+  // The reader picks a VOICE. Each voice is one engine behind the same
+  // playClip/stop interface, so speed and stop behave identically:
+  //
+  //   google (default) — Google Translate TTS. Played through <audio src>
+  //     (no CORS needed), but it 404s any request carrying a Referer, which
+  //     the page-wide <meta referrer no-referrer> in index.html suppresses.
+  //     Requests must stay under ~200 chars, so the summary is split
+  //     (ttsChunks) and the clips are played back to back.
+  //   vifast — ViFastTts (tts.vifast.org), Vietnamese ONNX model. Natural
+  //     pacing, reads the whole summary in ONE request. The public demo does
+  //     NOT send Access-Control-Allow-Origin (it runs without --cors), so it
+  //     is reached through a CORS pass-through (TTS_PROXY); a direct fetch
+  //     would be blocked by the browser on this static origin.
+  //
+  // If the chosen voice fails, the OTHER one is tried before giving up, so a
+  // dead proxy or a rate limit never leaves the button doing nothing.
   const GTTS = "https://translate.googleapis.com/translate_tts?ie=UTF-8&client=gtx&tl=vi";
+  const VFTTS = "https://tts.vifast.org";
+  const TTS_PROXY = "https://cors.rin2401.workers.dev/";
+  // Voice list, in picker order. `id` is what gets persisted.
+  const TTS_VOICES = [
+    { id: "google", label: "Google Dịch", hint: "Giọng tiếng Việt của Google Dịch" },
+    { id: "vifast", label: "ViFastTts", hint: "Model tiếng Việt (Ngọc Huyền), đọc tự nhiên" },
+  ];
+  const TTS_DEFAULT_VOICE = "google";
+  // The ViFastTts model is single-speaker (northern). Accepted by the API but
+  // currently produces identical audio, so it is not surfaced as a choice.
+  const TTS_DIALECT = "north";
+  // Server-side limits of the ViFastTts demo (/api/config):
+  // max_chars 3000, rate_limit 6 per 60 s per IP. The summary is far
+  // shorter than max_chars, so one request covers it.
+  const VFTTS_MAX_CHARS = 3000;
+
   let tts = { playing: false, token: 0, audio: null };
 
   // ---- reading speed (persisted) ----
@@ -2535,16 +2563,97 @@
     return "⚡ " + ttsRate + "×";
   }
   let ttsRate = loadTtsRate();
-  if (artEls.ttsRateBtn) artEls.ttsRateBtn.textContent = ttsRateLabel();
-  artEls.ttsRateBtn.addEventListener("click", () => {
-    ttsRate = TTS_RATES[(TTS_RATES.indexOf(ttsRate) + 1) % TTS_RATES.length];
+
+  // ---- voice (persisted) ----
+  function loadTtsVoice() {
+    let v = "";
     try {
-      localStorage.setItem("news24:ttsrate", String(ttsRate));
+      v = localStorage.getItem("news24:ttsvoice") || "";
     } catch {}
-    artEls.ttsRateBtn.textContent = ttsRateLabel();
-    // adjust the chunk that is already playing, no restart needed
-    if (tts.audio) tts.audio.playbackRate = ttsRate;
-  });
+    return TTS_VOICES.some((x) => x.id === v) ? v : TTS_DEFAULT_VOICE;
+  }
+  let ttsVoice = loadTtsVoice();
+  function ttsVoiceLabel() {
+    const v = TTS_VOICES.find((x) => x.id === ttsVoice) || TTS_VOICES[0];
+    return "🗣 " + v.label;
+  }
+
+  function syncTtsDevices() {
+    if (artEls.ttsRateBtn) artEls.ttsRateBtn.textContent = ttsRateLabel();
+    if (artEls.ttsVoiceBtn) artEls.ttsVoiceBtn.textContent = ttsVoiceLabel();
+    if (artEls.ttsVoiceMenu) {
+      for (const btn of artEls.ttsVoiceMenu.querySelectorAll("[data-voice]")) {
+        const on = btn.dataset.voice === ttsVoice;
+        btn.setAttribute("aria-checked", on ? "true" : "false");
+        btn.classList.toggle("is-on", on);
+      }
+    }
+  }
+  syncTtsDevices();
+
+  if (artEls.ttsRateBtn) {
+    artEls.ttsRateBtn.addEventListener("click", () => {
+      ttsRate = TTS_RATES[(TTS_RATES.indexOf(ttsRate) + 1) % TTS_RATES.length];
+      try {
+        localStorage.setItem("news24:ttsrate", String(ttsRate));
+      } catch {}
+      syncTtsDevices();
+      // adjust the clip that is already playing, no restart needed
+      if (tts.audio) tts.audio.playbackRate = ttsRate;
+    });
+  }
+
+  // ---- voice picker (a small popover under the button) ----
+  function setTtsVoice(id, restartIfPlaying) {
+    if (!TTS_VOICES.some((v) => v.id === id)) return;
+    ttsVoice = id;
+    try {
+      localStorage.setItem("news24:ttsvoice", id);
+    } catch {}
+    syncTtsDevices();
+    // The voice is baked into synthesis, so a playing clip has to be redone.
+    if (restartIfPlaying && tts.playing) {
+      stopTts();
+      startTts();
+    }
+  }
+
+  function closeTtsVoiceMenu() {
+    if (!artEls.ttsVoiceMenu) return;
+    artEls.ttsVoiceMenu.hidden = true;
+    if (artEls.ttsVoiceBtn) artEls.ttsVoiceBtn.setAttribute("aria-expanded", "false");
+  }
+
+  if (artEls.ttsVoiceBtn && artEls.ttsVoiceMenu) {
+    artEls.ttsVoiceBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const open = artEls.ttsVoiceMenu.hidden;
+      artEls.ttsVoiceMenu.hidden = !open;
+      artEls.ttsVoiceBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+    for (const item of artEls.ttsVoiceMenu.querySelectorAll("[data-voice]")) {
+      item.addEventListener("click", (e) => {
+        e.stopPropagation();
+        setTtsVoice(item.dataset.voice, true);
+        closeTtsVoiceMenu();
+      });
+    }
+    // Click-away / Escape / leaving the article all close the popover.
+    document.addEventListener("click", closeTtsVoiceMenu);
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeTtsVoiceMenu();
+    });
+  }
+
+  // Object URLs handed to <audio>; revoked when the element is dropped so a
+  // long reading session does not pin every clip in memory.
+  let ttsUrl = null;
+  function releaseTtsUrl() {
+    if (ttsUrl) {
+      URL.revokeObjectURL(ttsUrl);
+      ttsUrl = null;
+    }
+  }
 
   function stopTts() {
     tts.token++;
@@ -2556,7 +2665,9 @@
       a.pause();
       a.removeAttribute("src"); // also aborts an in-flight load
     }
+    releaseTtsUrl();
     if (artEls.ttsBtn) artEls.ttsBtn.textContent = "🔊 Đọc tóm tắt";
+    closeTtsVoiceMenu();
   }
 
   // Split the summary into Google Translate TTS requests of <= TTS_MAX
@@ -2666,6 +2777,61 @@
     return out;
   }
 
+  // Play one clip through the shared <audio> element and resolve when it
+  // ends. The element is kept (not recreated) so changing the speed applies
+  // to the clip already playing, and stopping aborts a pending fetch too.
+  function playClip(src, token) {
+    return new Promise((resolve, reject) => {
+      const a = tts.audio || new Audio();
+      tts.audio = a;
+      a.onended = resolve;
+      a.onerror = () => reject(new Error("tts decode"));
+      a.src = src;
+      a.defaultPlaybackRate = ttsRate; // survives the load algorithm reset
+      a.playbackRate = ttsRate; // browsers keep the voice pitch (preservesPitch)
+      a.play().catch((err) => reject(err || new Error("tts play")));
+    }).then(
+      (v) => {
+        if (tts.token !== token) throw new Error("stopped");
+        return v;
+      },
+      (err) => {
+        if (tts.token !== token) throw new Error("stopped");
+        throw err;
+      }
+    );
+  }
+
+  // ---- engine 1: ViFastTts (/api/tts -> WAV bytes) ----
+  // One POST for the whole summary; the response is a 24 kHz mono WAV.
+  // Throws on any failure so the caller can fall back to Google.
+  async function fetchViFastTts(text) {
+    const body = {
+      text: text.slice(0, VFTTS_MAX_CHARS),
+      speed: 1.0, // pacing is applied on playback, so one clip per speed
+      dialect: TTS_DIALECT,
+    };
+    const res = await fetchWithTimeout(
+      TTS_PROXY + VFTTS + "/api/tts",
+      30000,
+      { "content-type": "application/json" }, // also triggers the CORS preflight
+      { method: "POST", body: JSON.stringify(body) }
+    );
+    if (!res.ok) {
+      // 429 = demo rate limit (6/min/IP); worth remembering for the session
+      const err = new Error("vifasttts HTTP " + res.status);
+      err.status = res.status;
+      throw err;
+    }
+    const blob = await res.blob();
+    // A proxy error page comes back as text/html or JSON, not audio.
+    if (!blob.size || !/^audio\//i.test(blob.type)) {
+      throw new Error("vifasttts bad payload: " + (blob.type || "empty"));
+    }
+    return blob;
+  }
+
+  // ---- engine 2: Google Translate TTS (one request per chunk) ----
   async function playGoogleTts(text, token) {
     const chunks = ttsChunks(text);
     for (let i = 0; i < chunks.length; i++) {
@@ -2676,42 +2842,84 @@
         "&idx=" + i +
         "&textlen=" + chunks[i].length +
         "&q=" + encodeURIComponent(chunks[i]);
-      await new Promise((resolve, reject) => {
-        const a = new Audio(url);
-        tts.audio = a;
-        a.defaultPlaybackRate = ttsRate; // survives the load algorithm reset
-        a.playbackRate = ttsRate; // browsers keep the voice pitch (preservesPitch)
-        a.onended = resolve;
-        a.onerror = () => reject(new Error("gtts chunk " + i));
-        a.play().catch(() => reject(new Error("gtts play " + i)));
-      });
+      await playClip(url, token);
     }
   }
 
-  artEls.ttsBtn.addEventListener("click", () => {
-    if (tts.playing) {
-      stopTts();
-      return;
+  // Play with the chosen voice; if it fails, fall through to the other one so
+  // the button never just does nothing. A 429 from ViFastTts is remembered for
+  // the session so a rate-limited visitor is not sent back to a queue it will
+  // only be rejected from again.
+  let vifastQuotaExhausted = false;
+
+  function ttsVoiceOrder() {
+    return [ttsVoice, ...TTS_VOICES.map((v) => v.id).filter((id) => id !== ttsVoice)];
+  }
+
+  async function playTts(text, token) {
+    let lastErr = null;
+    for (const engine of ttsVoiceOrder()) {
+      if (tts.token !== token) return;
+      if (engine === "vifast" && vifastQuotaExhausted) continue;
+      try {
+        if (engine === "vifast") {
+          const blob = await fetchViFastTts(text);
+          if (tts.token !== token) return; // stopped while fetching
+          releaseTtsUrl();
+          ttsUrl = URL.createObjectURL(blob);
+          await playClip(ttsUrl, token);
+        } else {
+          await playGoogleTts(text, token);
+        }
+        return; // played to the end
+      } catch (err) {
+        if (tts.token !== token) return; // user already stopped
+        lastErr = err;
+        if (err && err.status === 429) vifastQuotaExhausted = true;
+        // Unlock/abort errors are not worth a second engine.
+        if (err && (err.name === "NotAllowedError" || err.name === "AbortError")) {
+          throw err;
+        }
+        console.warn(
+          "[tts] " + engine + " lỗi:",
+          (err && err.message) || err,
+          "— thử nguồn kế tiếp"
+        );
+      }
     }
+    throw lastErr || new Error("no tts engine");
+  }
+
+  // Start reading the current summary from the top (also used by the
+  // dialect toggle, which has to re-synthesise the clip).
+  function startTts() {
     const text = summarySpeech();
     if (!text) return;
     tts.playing = true;
     artEls.ttsBtn.textContent = "⏹ Dừng đọc";
+    closeTtsVoiceMenu();
     const token = ++tts.token;
-    playGoogleTts(text, token)
+    playTts(text, token)
       .then(() => {
         if (tts.token === token) stopTts(); // finished naturally
       })
       .catch((err) => {
         if (tts.token !== token) return; // user already stopped
-        stopTts(); // no second voice: tell the user instead of switching
-        console.warn("[tts] Google Translate TTS lỗi:", err && err.message);
+        stopTts();
+        console.warn("[tts] không đọc được:", err && err.message);
         artEls.ttsBtn.textContent = "⚠️ Không đọc được";
         setTimeout(() => {
           if (!tts.playing) artEls.ttsBtn.textContent = "🔊 Đọc tóm tắt";
         }, 2000);
       });
-  });
+  }
+
+  if (artEls.ttsBtn) {
+    artEls.ttsBtn.addEventListener("click", () => {
+      if (tts.playing) stopTts();
+      else startTts();
+    });
+  }
 
   // In-page navigation: pushState keeps the pretty /news/<slug>.html URL
   // while rendering without a page load (and the 404-trick still serves
