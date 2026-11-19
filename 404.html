@@ -92,6 +92,17 @@
         <!-- skeleton rows injected by JS -->
       </div>
 
+      <!-- Tin được quan tâm lives at the end of the main column, not in the
+           sidebar: readers on phones hit the section last, after the list. -->
+      <aside class="side-block" aria-labelledby="sideTitle">
+        <div class="side-box side-box--head">
+          <h2 class="side-title" id="sideTitle">
+            <span class="side-bar"></span>Tin được quan tâm
+          </h2>
+        </div>
+        <div id="sideList" class="side-list"></div>
+      </aside>
+
       <div class="load-more-wrap">
         <button id="loadMoreBtn" class="load-more" type="button" hidden>Xem thêm tin</button>
       </div>
@@ -256,23 +267,6 @@
       </div>
 
     </section>
-
-    <!-- Sidebar. The "Tin được quan tâm" head and its list are siblings
-         rather than one <div>, so on portrait phones the list can be pinned
-         to the very top of the page (order) while staying inside the
-         <aside> landmark for screen readers / desktop layout. -->
-    <aside class="sidebar">
-      <div class="side-box side-box--head">
-        <h2 class="side-title">
-          <span class="side-bar"></span>Tin được quan tâm
-        </h2>
-      </div>
-      <div id="sideList" class="side-list"></div>
-      <div class="side-box side-about">
-        <h2 class="side-title"><span class="side-bar"></span>Về trang này</h2>
-        <p>News24 tổng hợp tin tức nhanh <strong>24 giờ</strong> qua RSS của <a href="https://vnexpress.net" target="_blank" rel="noopener">VnExpress</a>. Mọi bài viết thuộc bản quyền VnExpress — nhấn vào tiêu đề để đọc bản gốc.</p>
-      </div>
-    </aside>
   </main>
 
   <!-- Chart tooltip: a direct <body> child, so the pointer leaving a mark

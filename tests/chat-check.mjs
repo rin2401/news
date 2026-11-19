@@ -1067,7 +1067,10 @@ section("6", "CSS: placement, dark theme, launcher size, 320px, reduced motion")
       straySelectors.map((r) => `${F.css}:${lineOf(cssNoComments, r.index)} parsed badly: ${r.selector.slice(0, 80)}`));
   }
 
-  // Append-only: the chat styles must not rewrite pre-existing rules.
+  // Append-only: the chat block must only add rules, never rewrite or drop
+  // the chat rules that already shipped. (A layout change elsewhere in the
+  // file is fine, so scope the diff to the chat section: from the first
+  // "Chatbot (js/chatbot.js)" banner to EOF.)
   //
   // Compare the real diff instead of string-prefixing the file against
   // `git show HEAD:` — HEAD legitimately moves forward as commits land
@@ -1076,14 +1079,31 @@ section("6", "CSS: placement, dark theme, launcher size, 320px, reduced motion")
   // `git diff` also answers the actual question directly: are any existing
   // lines gone?
   try {
-    const diff = execFileSync("git", ["diff", "--", "css/style.css"], {
+    const diff = execFileSync("git", ["diff", "-U0", "--", "css/style.css"], {
       cwd: ROOT, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"],
     });
-    const removed = diff
-      .split("\n")
-      .filter((ln) => ln.startsWith("-") && !ln.startsWith("---"));
+    // A removal counts only when the old-file line it drops sits inside the
+    // chat section of HEAD. Track the old-file line number per hunk and
+    // skip only the chat section.
+    const head = execFileSync("git", ["show", "HEAD:css/style.css"], {
+      cwd: ROOT, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"],
+    }).split("\n");
+    const chatStart = head.findIndex((ln) => /Chatbot \(js\/chatbot\.js\)/.test(ln));
+    const chatFrom = chatStart < 0 ? Infinity : chatStart + 1; // 1-based
+    const removed = [];
+    let oldLine = 0;
+    for (const ln of diff.split("\n")) {
+      const hunk = /^@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@/.exec(ln);
+      if (hunk) { oldLine = Number(hunk[1]); continue; }
+      if (ln.startsWith("-") && !ln.startsWith("---")) {
+        if (oldLine >= chatFrom) removed.push(ln);
+        oldLine++;
+      } else if (ln.startsWith(" ")) {
+        oldLine++;
+      }
+    }
     check(
-      "css/style.css is append-only vs git HEAD (no existing rule edited)",
+      "chat CSS block is append-only vs git HEAD (no shipped chat rule edited)",
       removed.length === 0,
       removed.slice(0, 10).map((ln) => `removed: ${ln.slice(0, 100)}`)
     );

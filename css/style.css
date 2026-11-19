@@ -342,16 +342,12 @@ a:hover { color: var(--link-hover); }
 /* ============ Layout ============ */
 .layout {
   display: grid;
-  /* minmax(0, …) so a wide child (the stats charts) can scroll or shrink
-     inside its column instead of stretching the whole page sideways. */
-  grid-template-columns: minmax(0, 1fr) 320px;
-  gap: 24px;
+  /* Single column: the main column stretches the full width (the stats
+     charts use it on desktop too) and "Tin được quan tâm" is appended at
+     the end of that column instead of sitting in a right-hand sidebar. */
+  grid-template-columns: minmax(0, 1fr);
   padding-top: 20px;
   padding-bottom: 40px;
-}
-
-@media (max-width: 1023px) {
-  .layout { grid-template-columns: minmax(0, 1fr); }
 }
 
 .col-header {
@@ -574,19 +570,17 @@ a:hover { color: var(--link-hover); }
   color: #fff;
 }
 
-/* ============ Sidebar ============ */
-/* The sidebar is a grid, not a flex column: the "Tin được quan tâm" heading
-   is a row of its own while the list stays its own item. Below 1024px the
-   sidebar is re-ordered into the main column so the list lands directly
-   under the section tab strip - the block every reader sees first. */
-.sidebar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  align-content: start;
-  gap: 16px;
+/* ============ Tin được quan tâm ============ */
+/* Sits at the end of the article list, below the paged headlines, so every
+   screen - phone first - reaches the section after the main list. The head
+   and the list are separate boxes snapped together into one card. */
+.side-block {
+  display: block;
+  margin-top: 4px;
+  scroll-margin-top: 72px; /* clear the sticky tab strip on jump links */
 }
 
-/* Standalone boxes (the about card on desktop) */
+/* Standalone boxes keep the card look */
 .side-box {
   background: var(--surface);
   border-radius: 8px;
@@ -597,7 +591,7 @@ a:hover { color: var(--link-hover); }
 .side-box[hidden] { display: none; }
 
 /* "Xem thêm tin quan tâm" only exists for the phone cut-off (<=639px), where
-   the list head shows the first 3 headlines; the phone block reveals it. */
+   the list head shows the first 3 headlines; the button reveals the rest. */
 .side-list .side-more { display: none; }
 
 .side-title {
@@ -619,8 +613,8 @@ a:hover { color: var(--link-hover); }
   margin-right: 8px;
 }
 
-/* The heading keeps its card look on its own row: rounded top only, so it
-   still reads as the top of one card once the list is stacked under it. */
+/* The heading is its own box: rounded top only, so it still reads as the top
+   of one card with the list stacked under it. */
 .side-box--head {
   padding: 12px 15px 0;
   border-radius: 8px 8px 0 0;
@@ -631,6 +625,15 @@ a:hover { color: var(--link-hover); }
   padding-bottom: 10px;
   margin-bottom: 0;
   border-bottom: 1px solid var(--border);
+}
+
+.side-list {
+  min-width: 0;
+  background: var(--surface);
+  border-radius: 0 0 8px 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .06);
+  padding: 2px 15px 6px;
+  margin-bottom: 4px;
 }
 
 .side-item {
@@ -644,7 +647,7 @@ a:hover { color: var(--link-hover); }
 .side-item:last-child { border-bottom: none; }
 
 .side-item .a-title {
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 700;
   line-height: 1.42;
   margin: 0;
@@ -654,7 +657,7 @@ a:hover { color: var(--link-hover); }
   overflow: hidden;
 }
 
-.side-item .a-meta { margin-top: 4px; font-size: 11px; }
+.side-item .a-meta { margin-top: 4px; font-size: 11.5px; }
 
 .side-thumb {
   flex: 0 0 76px;
@@ -667,44 +670,21 @@ a:hover { color: var(--link-hover); }
 .side-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .side-item.no-img .side-thumb { display: none; }
 
-.side-about p { font-size: 13px; color: var(--text-2); margin: 0; }
-.side-about a { color: var(--primary); font-weight: 600; }
-
-/* ============ Phones / portrait tablets (<=1023px) ============ */
-/* Layout: top header, sticky tab strip, then "Tin được quan tâm" right under
-   it, then the section itself (title, featured story, article rows). The
-   list used to sit *below* the whole sidebar - i.e. after the 12-headline
-   card plus the about card - pushing the first headline ~1300px down. */
-@media (max-width: 1023px) {
-  .layout {
-    padding-top: 12px;
-    gap: 14px;
-  }
-
-  .sidebar { order: -1.5; }
-  .side-box--head { order: 1; }
+/* Wide screens: a two-column headline list keeps the block compact */
+@media (min-width: 768px) {
   .side-list {
-    order: 2;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-    background: var(--surface);
-    border-radius: 0 0 8px 8px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, .06);
-    padding: 2px 15px 6px;
-    margin-bottom: 4px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 24px;
   }
-  /* JS hides the about card below 1024px; this keeps it hidden (and out of
-     the flow) even if the script never runs. */
-  .side-about { order: 3; display: none; }
-  .main-col { order: 1; }
+  .side-item:nth-last-child(2) { border-bottom: none; }
 }
 
-/* Phones: three headlines up front, then "Xem thêm tin quan tâm". The rest
-   are revealed on demand so the section's own title and lead story still
-   arrive within the first couple of swipes. */
+/* Phones: the block is the last thing in the list view, so show every
+   headline up front; only the first 3 stay visible until expanded, and the
+   "Xem thêm" button reveals the rest so the list still ends on a light note. */
 @media (max-width: 639px) {
+  .side-list { display: flex; flex-direction: column; gap: 2px; }
   .side-list .side-item:nth-child(n + 4) { display: none; }
   .side-list.expanded .side-item:nth-child(n + 4) { display: flex; }
 
@@ -2212,11 +2192,10 @@ body.modal-open { overflow: hidden; }
 }
 
 /* ---- Stats view served inside 404.html (/stats on GitHub Pages) ----
-   There the charts sit in the main column of the shared layout, next to the
-   news sidebar, instead of a full-width <main>. js/stats.js adds
-   .stats-view to <html> as soon as it starts drawing. */
-html.stats-view .side-box--head,
-html.stats-view .side-list { display: none; }
+   There the charts sit in the main column of the shared layout, instead of
+   a full-width <main>. js/stats.js adds .stats-view to <html> as soon as it
+   starts drawing; the news "Tin được quan tâm" block does not belong there. */
+html.stats-view .side-block { display: none; }
 
 html.stats-view .stats-page {
   padding-top: 0;
@@ -2224,11 +2203,6 @@ html.stats-view .stats-page {
 }
 
 html.stats-view .stats-page > .col-header { margin-top: 0; }
-
-/* On phones the sidebar block would otherwise push the charts down. */
-@media (max-width: 1023px) {
-  html.stats-view .sidebar { display: none; }
-}
 
 /* ============ Chatbot (js/chatbot.js) ============
    Launcher + panel shell from index.html/404.html; everything inside

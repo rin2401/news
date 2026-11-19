@@ -1,7 +1,7 @@
 /* News24 - VnExpress RSS reader
  * Fetches VnExpress RSS through a chain of public CORS proxies
  * (first success wins), caches to localStorage, renders a
- * VnExpress-style list with sidebar, search and dark mode. */
+ * VnExpress-style headline list, search and dark mode. */
 "use strict";
 
 (function () {
@@ -507,7 +507,8 @@
   // ------------------------------------------------------------------
   // Data loading
   // ------------------------------------------------------------------
-  let sideLoad = null; // sidebar promise shared across category switches
+  // "Tin được quan tâm" promise, shared across category switches
+  let sideLoad = null;
 
   async function loadSidebar() {
     if (!sideLoad) {
@@ -773,18 +774,9 @@
     return m ? m[1] : link || "#";
   }
 
-  // "Về trang này" is a desktop sidebar card: on phones the sidebar is
-  // pinned above the article, where the reader has priority over meta copy,
-  // so JS hides it below 1024px (the markup ships it visible, so it still
-  // shows up if this script never runs). CSS also drops it below 640px.
-  const wideLayout = window.matchMedia("(min-width: 1024px)");
-  const aboutBox = document.querySelector(".side-about");
-  function syncAboutBox() {
-    const stats = document.documentElement.classList.contains("stats-view");
-    if (aboutBox) aboutBox.hidden = stats || !wideLayout.matches;
-  }
-  syncAboutBox();
-  wideLayout.addEventListener("change", syncAboutBox);
+  // "Tin được quan tâm" closes the list view (below the headlines), so it is
+  // hidden on the stats page, which reuses the shared layout. No DOM lookup
+  // is needed: CSS keys off .stats-view on <html> (see style.css).
 
   function showView(name) {
     artEls.listView.hidden = name !== "list";
@@ -795,7 +787,6 @@
     const statsView = document.getElementById("viewStats");
     if (statsView) statsView.hidden = name !== "stats";
     document.documentElement.classList.toggle("stats-view", name === "stats");
-    syncAboutBox();
     broadcastArticleView(name);
   }
 
@@ -2985,7 +2976,7 @@
     broadcastArticleView("article");
   }
 
-  // Card clicks (list + sidebar) with plain slug.html hrefs become
+  // Card clicks (list + "Tin được quan tâm") with plain slug.html hrefs become
   // in-page transitions; modified clicks fall through to native
   // navigation (new tab), unknown links to the 404-trick page load.
   document.addEventListener("click", (e) => {

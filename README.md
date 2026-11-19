@@ -11,10 +11,12 @@ browser.
 
 - 11 categories: Tin mới nhất, Thời sự, Thế giới, Kinh doanh,
   Bất động sản, Thể thao, Giải trí, Sức khỏe, Giáo dục, Du lịch, Pháp luật
-- VnExpress-style layout: featured story, thumbnail list, sidebar headlines
-- **Mobile-first ordering**: on phones and tablets the *Tin được quan tâm*
-  block sits at the very top of the page, right under the category tabs (its
-  first 3 headlines, then "Xem thêm tin quan tâm"); the section itself follows
+- VnExpress-style layout: featured story, thumbnail list
+- **"Tin được quan tâm" closes the list**: the headline block sits at the end
+  of the article list (below "Xem thêm tin"), not in a right-hand sidebar, so
+  on phones it is the last thing after the main feed. On phones it shows the
+  first 3 headlines plus a "Xem thêm tin quan tâm" button; wider screens show
+  them all in two columns
 - **In-page reader**: click an article to read it right on the page — full
   text is fetched via [r.jina.ai](https://r.jina.ai) (HTML mode) with the RSS
   proxies as fallback, sanitized to a tag whitelist (scripts/styles/trackers
